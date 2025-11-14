@@ -93,14 +93,14 @@ Understanding the difference between proper image reuse and wasteful duplication
 ┌─────────────────────────────────────────────────────────────────────┐
 │  ❌ INEFFICIENT: Inserting the same image 3 times                   │
 ├─────────────────────────────────────────────────────────────────────┤
-│                                                                       │
-│  Slide 1: [Logo]  ──────────►  ppt/media/image1.png (400 KB)       │
-│                                                                       │
-│  Slide 2: [Logo]  ──────────►  ppt/media/image2.png (400 KB)       │
-│                                                                       │
-│  Slide 3: [Logo]  ──────────►  ppt/media/image3.png (400 KB)       │
-│                                                                       │
-│  Total: 1,200 KB                                                     │
+│                                                                     │
+│  Slide 1: [Logo]  ──────────►  ppt/media/image1.png (400 KB)        │
+│                                                                     │
+│  Slide 2: [Logo]  ──────────►  ppt/media/image2.png (400 KB)        │
+│                                                                     │
+│  Slide 3: [Logo]  ──────────►  ppt/media/image3.png (400 KB)        │
+│                                                                     │
+│  Total: 1,200 KB                                                    │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -108,13 +108,13 @@ Understanding the difference between proper image reuse and wasteful duplication
 ├─────────────────────────────────────────────────────────────────────┤
 │                                    ┌──► ppt/media/image1.png        │
 │  Slide 1: [Logo]  ────────────────┤     (400 KB)                    │
-│                                    │                                 │
+│                                    │                                │
 │  Slide 2: [Logo]  ────────────────┤                                 │
-│                                    │                                 │
+│                                    │                                │
 │  Slide 3: [Logo]  ────────────────┘                                 │
-│                                                                       │
-│  Total: 400 KB                                                       │
-│  Savings: 800 KB (67%)                                               │
+│                                                                     │
+│  Total: 400 KB                                                      │
+│  Savings: 800 KB (67%)                                              │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
