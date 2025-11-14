@@ -397,11 +397,11 @@ The script automatically detects the OS and adjusts paths accordingly.
 
    ```powershell
    # Clone the repository
-   git clone https://github.com/yourusername/Optimize-PptImages.git
+   git clone https://github.com/Rouzax/Optimize-PptImages.git
    cd Optimize-PptImages
 
    # Or download directly
-   Invoke-WebRequest -Uri "https://raw.githubusercontent.com/yourusername/Optimize-PptImages/main/Optimize-PptImages.ps1" -OutFile "Optimize-PptImages.ps1"
+   Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Rouzax/Optimize-PptImages/main/Optimize-PptImages.ps1" -OutFile "Optimize-PptImages.ps1"
    ```
 
 3. **Verify ImageMagick Installation**
@@ -746,21 +746,6 @@ Typical processing times (varies by hardware):
 
 ---
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues or pull requests.
-
-### Development Setup
-
-```powershell
-# Clone repository
-git clone https://github.com/yourusername/Optimize-PptImages.git
-cd Optimize-PptImages
-
-# Test with verbose output
-.\Optimize-PptImages.ps1 -InputPath "test.pptx" -Verbose
-```
-
 ### Reporting Issues
 
 When reporting issues, please include:
@@ -772,32 +757,10 @@ When reporting issues, please include:
 
 ---
 
-## License
-
-[Specify your license here - MIT, GPL, etc.]
-
----
-
 ## Acknowledgments
 
 - **ImageMagick** for high-quality image processing
 - PowerPoint Open XML format documentation
-- Community contributors and testers
-
----
-
-## Version History
-
-### Current Version
-- ✅ Intelligent image resizing with headroom factor
-- ✅ Physical crop application
-- ✅ PNG-to-JPEG conversion with transparency analysis
-- ✅ Morph transition protection
-- ✅ Master/Layout slide support
-- ✅ Cross-platform compatibility
-- ✅ Comprehensive CSV reporting
-- ✅ "No worse than before" safety guards
-- ✅ Unreferenced media cleanup
 
 ---
 
