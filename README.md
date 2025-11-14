@@ -89,34 +89,36 @@ PowerPoint's architecture allows **multiple slides to reference the same physica
 
 Understanding the difference between proper image reuse and wasteful duplication:
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  ❌ INEFFICIENT: Inserting the same image 3 times                   │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  Slide 1: [Logo]  ──────────►  ppt/media/image1.png (400 KB)        │
-│                                                                     │
-│  Slide 2: [Logo]  ──────────►  ppt/media/image2.png (400 KB)        │
-│                                                                     │
-│  Slide 3: [Logo]  ──────────►  ppt/media/image3.png (400 KB)        │
-│                                                                     │
-│  Total: 1,200 KB                                                    │
-└─────────────────────────────────────────────────────────────────────┘
+**❌ INEFFICIENT: Inserting the same image 3 times**
 
-┌─────────────────────────────────────────────────────────────────────┐
-│  ✅ EFFICIENT: Copy-pasting the image (shared reference)            │
-├─────────────────────────────────────────────────────────────────────┤
-│                                    ┌──► ppt/media/image1.png        │
-│  Slide 1: [Logo]  ────────────────┤     (400 KB)                    │
-│                                    │                                │
-│  Slide 2: [Logo]  ────────────────┤                                 │
-│                                    │                                │
-│  Slide 3: [Logo]  ────────────────┘                                 │
-│                                                                     │
-│  Total: 400 KB                                                      │
-│  Savings: 800 KB (67%)                                              │
-└─────────────────────────────────────────────────────────────────────┘
 ```
+Slide 1: [Logo]  --------->  ppt/media/image1.png (400 KB)
+
+Slide 2: [Logo]  --------->  ppt/media/image2.png (400 KB)
+
+Slide 3: [Logo]  --------->  ppt/media/image3.png (400 KB)
+
+Total storage: 1,200 KB (3 separate files)
+```
+
+**✅ EFFICIENT: Copy-pasting the image (shared reference)**
+
+```
+                              +---> ppt/media/image1.png
+Slide 1: [Logo]  ------------+      (400 KB - shared file)
+                              |
+Slide 2: [Logo]  ------------+
+                              |
+Slide 3: [Logo]  ------------+
+
+Total storage: 400 KB (1 shared file, 3 references)
+Savings: 800 KB (67% reduction)
+```
+
+**The key difference:**
+- **Inefficient approach** creates 3 separate 400 KB files = 1,200 KB total
+- **Efficient approach** creates 1 shared 400 KB file with 3 references = 400 KB total
+- **Result:** Same visual appearance, 67% less storage
 
 #### How to Reuse Images as a User
 
@@ -754,6 +756,7 @@ When reporting issues, please include:
 3. Operating system
 4. Sample PPTX file (if possible)
 5. Full console output with `-Verbose`
+
 
 ---
 
