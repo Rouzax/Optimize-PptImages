@@ -136,7 +136,6 @@ class ImageUsage {
     [bool]$IsMorphSlide
     [object]$MorphPair  # Link to paired usage
     [bool]$IsSvgFallbackUsage
-    [string]$SvgPartPath
     [string]$BlipRId
     [string]$PartPath
     [object]$BlipElement
@@ -798,7 +797,6 @@ function Get-PictureUsage {
         IsMorphSlide = $isMorphSlide
         MorphPair = $null
         IsSvgFallbackUsage = $svgCheck.IsSvgFallback
-        SvgPartPath = $svgCheck.SvgRId
         BlipRId = $rId
         PartPath = $partPath  # Keep original forward-slash format for XML operations
         BlipElement = $blip
@@ -903,7 +901,6 @@ function Get-BlipUsage {
         IsMorphSlide = $false
         MorphPair = $null
         IsSvgFallbackUsage = $svgCheck.IsSvgFallback
-        SvgPartPath = $svgCheck.SvgRId
         BlipRId = $rId
         PartPath = $partPath
         BlipElement = $blip
