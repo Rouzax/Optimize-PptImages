@@ -1513,6 +1513,7 @@ function Invoke-CropOperation {
 #region Optimization
 
 function Invoke-ImageOptimization {
+    [CmdletBinding(SupportsShouldProcess)]
     param(
         [System.Collections.Generic.List[ImageUsage]]$usages,
         [string]$tempDir,
