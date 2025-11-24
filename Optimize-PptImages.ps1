@@ -293,11 +293,6 @@ function ConvertFrom-EMU {
     return [Math]::Round($emu / $script:Config.EMU_PER_INCH * $script:Config.DPI)
 }
 
-function ConvertTo-EMU {
-    param([double]$pixels)
-    return [long]($pixels * $script:Config.EMU_PER_INCH / $script:Config.DPI)
-}
-
 function Get-CropPercentage {
     param(
         [double]$left,
