@@ -107,6 +107,7 @@ $script:Config = @{
     JPEG_SAMPLING_FACTOR_DEFAULT = '4:2:0'
     JPEG_SAMPLING_FACTOR_UI = '4:4:4'
     PNG_COMPRESSION_LEVEL = 9
+    RESIZE_FILTER = 'Lanczos'
     IMAGEMAGICK_MEMORY_LIMIT = '2GB'
     IMAGEMAGICK_MAP_LIMIT = '4GB'
     PARALLEL_THROTTLE_LIMIT = 4
@@ -1185,6 +1186,7 @@ function Invoke-CropNormalization {
 #region Cropping
 
 function Invoke-ImageCropping {
+    [CmdletBinding(SupportsShouldProcess)]
     param(
         [System.Collections.Generic.List[ImageUsage]]$usages,
         [string]$tempDir,
@@ -1855,8 +1857,9 @@ function Optimize-Jpeg {
     
     $outputPath = "$($group.PhysicalPath).tmp"
     
-    $args = @(
+    $magickArgs = @(
         $group.PhysicalPath,
+        '-filter', $script:Config.RESIZE_FILTER,
         '-resize', "${targetWidth}x${targetHeight}>",
         '-strip',
         '-quality', $JpegQuality,
@@ -1866,7 +1869,7 @@ function Optimize-Jpeg {
         $outputPath
     )
     
-    & $script:MagickExe $args 2>&1 | Out-Null
+    & $script:MagickExe $magickArgs 2>&1 | Out-Null
     
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $outputPath)) {
         throw "JPEG optimization failed"
@@ -1923,8 +1926,9 @@ function Optimize-PngWithAlpha {
     
     $outputPath = "$($group.PhysicalPath).tmp"
     
-    $args = @(
+    $magickArgs = @(
         $group.PhysicalPath,
+        '-filter', $script:Config.RESIZE_FILTER,
         '-resize', "${targetWidth}x${targetHeight}>",
         '-strip',
         '-define', "png:compression-level=$($script:Config.PNG_COMPRESSION_LEVEL)",
@@ -1932,7 +1936,7 @@ function Optimize-PngWithAlpha {
         $outputPath
     )
     
-    & $script:MagickExe $args 2>&1 | Out-Null
+    & $script:MagickExe $magickArgs 2>&1 | Out-Null
     
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $outputPath)) {
         throw "PNG optimization failed"
@@ -1999,14 +2003,17 @@ function ConvertTo-Jpeg {
         $counter++
     }
     
-    $args = @($group.PhysicalPath)
+    $magickArgs = @($group.PhysicalPath)
     
     if ($resize) {
         $usage = $group.Usages[0]
-        $args += @('-resize', "$($usage.TargetWidthPx)x$($usage.TargetHeightPx)>")
+        $magickArgs += @(
+            '-filter', $script:Config.RESIZE_FILTER,
+            '-resize', "$($usage.TargetWidthPx)x$($usage.TargetHeightPx)>"
+        )
     }
     
-    $args += @(
+    $magickArgs += @(
         '-strip',
         '-quality', $JpegQuality,
         '-define', 'jpeg:optimize-coding=true',
@@ -2015,7 +2022,7 @@ function ConvertTo-Jpeg {
         $outputPath
     )
     
-    & $script:MagickExe $args 2>&1 | Out-Null
+    & $script:MagickExe $magickArgs 2>&1 | Out-Null
     
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $outputPath)) {
         throw "PNG to JPEG conversion failed"
