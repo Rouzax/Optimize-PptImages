@@ -229,15 +229,12 @@ function Initialize-Script {
         Write-Verbose "  TransparencyThreshold: $TransparencyThresholdPercent%"
     }
     
-    # Check if output file is accessible (fail early)
-    if (Test-Path -LiteralPath $script:OutputFile) {
-        try {
-            $testStream = [System.IO.File]::Open($script:OutputFile, 'Open', 'Write', 'None')
-            $testStream.Close()
-            $testStream.Dispose()
-        } catch {
-            throw "Output file is in use by another process: $script:OutputFile. Please close it and try again."
-        }
+    # Check if output files are accessible (fail early)
+    if (Test-FileInUse -Path $script:OutputFile) {
+        throw "Output file is in use by another process: $script:OutputFile. Please close it and try again."
+    }
+    if (Test-FileInUse -Path $script:CsvReport) {
+        throw "CSV report file is in use by another process: $script:CsvReport. Please close it (Excel?) and try again."
     }
 
     # Find ImageMagick
@@ -287,6 +284,23 @@ function Find-ImageMagick {
 #endregion
 
 #region Utility Functions
+
+function Test-FileInUse {
+    param([string]$Path)
+    
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $false
+    }
+    
+    try {
+        $stream = [System.IO.File]::Open($Path, 'Open', 'Write', 'None')
+        $stream.Close()
+        $stream.Dispose()
+        return $false
+    } catch {
+        return $true
+    }
+}
 
 function ConvertFrom-EMU {
     param([long]$emu)
@@ -351,8 +365,7 @@ function Format-Savings {
 
 function Get-UniqueRId {
     param(
-        [System.Xml.XmlDocument]$relsDoc,
-        [string]$prefix = "rId"
+        [System.Xml.XmlDocument]$relsDoc
     )
     
     # Force array collection to prevent pipeline leakage
@@ -2188,18 +2201,15 @@ function Update-ContentTypes {
 
 function Invoke-Repack {
     param(
-        [string]$tempDir,
-        [string]$outputPath
+        [string]$tempDir
     )
     
     Write-Host "`nRepacking presentation..." -ForegroundColor Yellow
     Write-Verbose "Creating optimized ZIP archive from: $tempDir"
-    Write-Verbose "Output file: $outputPath"
     
-    if (Test-Path -LiteralPath $outputPath) {
-        Write-Verbose "Removing existing output file..."
-        Remove-Item -LiteralPath $outputPath -Force
-    }
+    # Create temp file for output (outside the extraction temp dir)
+    $tempOutputPath = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "ppt-opt-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).pptx")
+    Write-Verbose "Temp output file: $tempOutputPath"
     
     # Force garbage collection to close any file handles
     Write-Verbose "Forcing garbage collection to release file handles..."
@@ -2213,25 +2223,27 @@ function Invoke-Repack {
         Write-Verbose "Creating ZIP archive with Optimal compression..."
         [System.IO.Compression.ZipFile]::CreateFromDirectory(
             $tempDir, 
-            $outputPath, 
+            $tempOutputPath, 
             [System.IO.Compression.CompressionLevel]::Optimal, 
             $false  # Don't include base directory
         )
         
         # Verify the output file was created and is valid
-        if (-not (Test-Path -LiteralPath $outputPath)) {
-            throw "Output file was not created: $outputPath"
+        if (-not (Test-Path -LiteralPath $tempOutputPath)) {
+            throw "Output file was not created: $tempOutputPath"
         }
         
-        $outputSize = (Get-Item -LiteralPath $outputPath).Length
+        $outputSize = (Get-Item -LiteralPath $tempOutputPath).Length
         Write-Verbose "Repack complete: output file is $(Format-ByteSize $outputSize)"
         
-        $fileInfo = Get-Item -LiteralPath $outputPath
+        $fileInfo = Get-Item -LiteralPath $tempOutputPath
         if ($fileInfo.Length -eq 0) {
-            throw "Output file is empty: $outputPath"
+            throw "Output file is empty: $tempOutputPath"
         }
         
-        Write-Host "✅ Created: $outputPath ($([Math]::Round($fileInfo.Length / 1KB, 2)) KB)" -ForegroundColor Green
+        Write-Host "✅ Repacked: $([Math]::Round($fileInfo.Length / 1KB, 2)) KB" -ForegroundColor Green
+        
+        return $tempOutputPath
         
     } catch {
         throw "Failed to create ZIP archive: $_"
@@ -2244,16 +2256,19 @@ function Invoke-Repack {
 
 function Export-CsvReport {
     param(
-        [System.Collections.Generic.List[ImageUsage]]$usages,
-        [string]$csvPath
+        [System.Collections.Generic.List[ImageUsage]]$usages
     )
     
     Write-Host "`nGenerating CSV report..." -ForegroundColor Yellow
     
+    # Create temp file for CSV (outside the extraction temp dir)
+    $tempCsvPath = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "ppt-opt-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).csv")
+    Write-Verbose "Temp CSV file: $tempCsvPath"
+    
     if (-not $usages -or $usages.Count -eq 0) {
         Write-Host "No usages to report" -ForegroundColor Gray
-        @() | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
-        return
+        @() | Export-Csv -Path $tempCsvPath -NoTypeInformation -Encoding UTF8
+        return $tempCsvPath
     }
     
     # Sort by savings (descending), then context, then slide number
@@ -2268,6 +2283,7 @@ function Export-CsvReport {
             Location = $usage.Location
             ContextType = $usage.ContextType
             SlideNumber = $usage.SlideNumber
+            SlideModified = if ($usage.CropApplied -or $usage.OptimizationStatus -match '^(Optimized|Converted)') { 'Yes' } else { 'No' }
             ShapeName = $usage.ShapeName
             SourceWidthPx = $usage.SourceWidthPx
             SourceHeightPx = $usage.SourceHeightPx
@@ -2296,8 +2312,64 @@ function Export-CsvReport {
         }
     }
     
-    $rows | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
-    Write-Host "📊 CSV report: $csvPath" -ForegroundColor Green
+    $rows | Export-Csv -Path $tempCsvPath -NoTypeInformation -Encoding UTF8
+    Write-Host "✅ CSV report generated" -ForegroundColor Green
+    
+    return $tempCsvPath
+}
+
+#endregion
+
+#region Output File Handling
+
+function Copy-OutputFilesToFinal {
+    param(
+        [string]$tempPptxPath,
+        [string]$tempCsvPath,
+        [string]$finalPptxPath,
+        [string]$finalCsvPath
+    )
+    
+    $result = @{
+        PptxSuccess = $false
+        CsvSuccess = $false
+        PptxTempPath = $tempPptxPath
+        CsvTempPath = $tempCsvPath
+    }
+    
+    # Try to copy PPTX
+    try {
+        if (Test-FileInUse -Path $finalPptxPath) {
+            Write-Warning "Cannot write to output file (in use): $finalPptxPath"
+        } else {
+            if (Test-Path -LiteralPath $finalPptxPath) {
+                Remove-Item -LiteralPath $finalPptxPath -Force
+            }
+            Copy-Item -LiteralPath $tempPptxPath -Destination $finalPptxPath -Force
+            $result.PptxSuccess = $true
+            Write-Host "📁 Output: $finalPptxPath" -ForegroundColor Green
+        }
+    } catch {
+        Write-Warning "Failed to copy PPTX to final destination: $_"
+    }
+    
+    # Try to copy CSV
+    try {
+        if (Test-FileInUse -Path $finalCsvPath) {
+            Write-Warning "Cannot write to CSV file (in use): $finalCsvPath"
+        } else {
+            if (Test-Path -LiteralPath $finalCsvPath) {
+                Remove-Item -LiteralPath $finalCsvPath -Force
+            }
+            Copy-Item -LiteralPath $tempCsvPath -Destination $finalCsvPath -Force
+            $result.CsvSuccess = $true
+            Write-Host "📊 Report: $finalCsvPath" -ForegroundColor Green
+        }
+    } catch {
+        Write-Warning "Failed to copy CSV to final destination: $_"
+    }
+    
+    return $result
 }
 
 #endregion
@@ -2319,6 +2391,11 @@ try {
     $tempDir = (Get-Item -LiteralPath $tempDir).FullName
     
     try {
+        # Initialize temp output file tracking (for cleanup in finally)
+        $tempPptxPath = $null
+        $tempCsvPath = $null
+        $copyFailed = $true  # Assume failure until copy succeeds
+        
         # Extract
         Expand-Archive -Path $script:InputFile -DestinationPath $tempDir -Force
         
@@ -2457,15 +2534,15 @@ try {
         }
         Write-Verbose "Pre-repack validation passed - all critical files present"
         
-        # Phase 5: Repack
-        Invoke-Repack -tempDir $tempDir -outputPath $script:OutputFile
+        # Phase 5: Repack (to temp file)
+        $tempPptxPath = Invoke-Repack -tempDir $tempDir
         
-        # Generate report
-        Export-CsvReport -usages $usages -csvPath $script:CsvReport
+        # Generate report (to temp file)
+        $tempCsvPath = Export-CsvReport -usages $usages
         
-        # Final statistics
+        # Final statistics (calculated from temp file)
         $originalSize = (Get-Item $script:InputFile).Length
-        $optimizedSize = (Get-Item $script:OutputFile).Length
+        $optimizedSize = (Get-Item $tempPptxPath).Length
         $savedBytes = $originalSize - $optimizedSize
         $savedPercent = ($savedBytes / $originalSize) * 100
         
@@ -2480,10 +2557,55 @@ try {
         Write-Host "  Optimized: $((Format-ByteSize $optimizedSize))" -ForegroundColor Green
         Write-Host "  Saved: $(Format-ByteSize $savedBytes) ($($savedPercent.ToString('F1'))%)" -ForegroundColor Green
         
+        # Phase 6: Copy to final destinations
+        Write-Host "`nSaving output files..." -ForegroundColor Yellow
+        $copyResult = Copy-OutputFilesToFinal `
+            -tempPptxPath $tempPptxPath `
+            -tempCsvPath $tempCsvPath `
+            -finalPptxPath $script:OutputFile `
+            -finalCsvPath $script:CsvReport
+        
+        # Handle any copy failures
+        $copyFailed = -not $copyResult.PptxSuccess -or -not $copyResult.CsvSuccess
+        if ($copyFailed) {
+            Write-Host "`n⚠️  Some output files could not be saved (files may be in use):" -ForegroundColor Yellow
+            if (-not $copyResult.PptxSuccess) {
+                Write-Host "  Optimized PPTX saved at: $tempPptxPath" -ForegroundColor Cyan
+                Write-Host "  → Close the target file and copy manually, or re-run the script." -ForegroundColor Gray
+            }
+            if (-not $copyResult.CsvSuccess) {
+                Write-Host "  CSV report saved at: $tempCsvPath" -ForegroundColor Cyan
+                Write-Host "  → Close the target file and copy manually, or re-run the script." -ForegroundColor Gray
+            }
+        }
+        
     } finally {
-        # Cleanup temp directory
+        # Cleanup extraction temp directory (always)
         if (Test-Path -LiteralPath $tempDir) {
             Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        
+        # Cleanup temp output files only if copy succeeded
+        if (-not $copyFailed) {
+            if ($tempPptxPath -and (Test-Path -LiteralPath $tempPptxPath)) {
+                Remove-Item -LiteralPath $tempPptxPath -Force -ErrorAction SilentlyContinue
+            }
+            if ($tempCsvPath -and (Test-Path -LiteralPath $tempCsvPath)) {
+                Remove-Item -LiteralPath $tempCsvPath -Force -ErrorAction SilentlyContinue
+            }
+        } elseif ($tempPptxPath -or $tempCsvPath) {
+            # If we have temp files but copy failed (or error occurred), tell user where they are
+            $hasTempPptx = $tempPptxPath -and (Test-Path -LiteralPath $tempPptxPath)
+            $hasTempCsv = $tempCsvPath -and (Test-Path -LiteralPath $tempCsvPath)
+            if ($hasTempPptx -or $hasTempCsv) {
+                Write-Host "`n💾 Temporary files preserved:" -ForegroundColor Yellow
+                if ($hasTempPptx) {
+                    Write-Host "  PPTX: $tempPptxPath" -ForegroundColor Cyan
+                }
+                if ($hasTempCsv) {
+                    Write-Host "  CSV:  $tempCsvPath" -ForegroundColor Cyan
+                }
+            }
         }
     }
     
