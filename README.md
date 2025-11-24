@@ -25,7 +25,6 @@ A cross-platform PowerShell script that intelligently optimizes PowerPoint prese
 - [Example Results](#example-results)
 - [Limitations and Considerations](#limitations-and-considerations)
 - [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
 
 ---
 
