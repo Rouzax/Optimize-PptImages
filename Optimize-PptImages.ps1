@@ -372,25 +372,6 @@ function Get-UniqueRId {
     Write-Output "rId$($maxNum + 1)"
 }
 
-function Get-UniqueMediaFileName {
-    param(
-        [string]$baseName,
-        [string]$extension,
-        [System.Collections.Generic.HashSet[string]]$existingNames
-    )
-    
-    $counter = 1
-    $candidate = "$baseName$extension"
-    
-    while ($existingNames.Contains($candidate)) {
-        $candidate = "$baseName$counter$extension"
-        $counter++
-    }
-    
-    $null = $existingNames.Add($candidate)
-    return $candidate
-}
-
 #endregion
 
 #region XML and Namespace Helpers
@@ -1508,7 +1489,7 @@ function Invoke-CropOperation {
 #region Optimization
 
 function Invoke-ImageOptimization {
-    [CmdletBinding(SupportsShouldProcess)]
+[CmdletBinding(SupportsShouldProcess)]
     param(
         [System.Collections.Generic.List[ImageUsage]]$usages,
         [string]$tempDir,
