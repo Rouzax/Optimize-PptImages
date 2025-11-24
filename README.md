@@ -239,7 +239,7 @@ Understanding when to use each format is crucial for **starting with an optimize
 - Older versions fall back to the auto-generated PNG raster
 - Both files are embedded: `image5.svg` and `image5.png`
 
-**Script behavior:** This script detects auto-generated PNG fallbacks and skips optimizing them, as PowerPoint will regenerate them if needed. The SVG file itself is not modified (vector formats don't benefit from raster optimization).
+**Script behavior:** This script detects auto-generated PNG fallbacks and skips optimizing them, as PowerPoint will regenerate them if needed. The SVG files themselves are not modified (vector formats don't benefit from raster optimization).
 
 ### Conversion Strategy
 
@@ -444,21 +444,23 @@ The script automatically detects the OS and adjusts paths accordingly.
 .\Optimize-PptImages.ps1 -InputPath "MyPresentation.pptx" `
     -HeadroomFactor 1.5 `
     -JpegQuality 90 `
-    -TransparencyThreshold 1.0
+    -TransparencyThresholdPercent 1.0
 ```
 
 ### Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `InputPath` | String | *Required* | Path to the input PPTX file |
-| `OutputPath` | String | `<input>_optimized.pptx` | Path for the optimized output file |
+| `InputPath` | String | *Required* | Path to the input PPTX or POTX file |
+| `OutputPath` | String | `<n>.optimized.<ext>` | Path for the optimized output file |
+| `MagickPath` | String | Auto-detected | Path to ImageMagick `magick` executable |
 | `EnableCropping` | Switch | `$false` | Apply physical crops to images with PowerPoint crop attributes |
-| `CropMastersAndLayouts` | Switch | `$false` | Apply crops to images in master slides and layouts |
+| `CropMastersAndLayouts` | Switch | `$false` | Apply crops to images in master slides and layouts (requires `-EnableCropping`) |
 | `OptimizeMastersAndLayouts` | Switch | `$false` | Resize/optimize images in master slides and layouts |
-| `HeadroomFactor` | Decimal | `2.0` | Multiplier for target dimensions (2.0 = 2× display size) |
+| `HeadroomFactor` | Decimal | `2.0` | Multiplier for target dimensions (2.0 = 2× display size). Range: 1.0-4.0 |
 | `JpegQuality` | Int | `95` | JPEG quality for compression (1-100, higher = better quality) |
-| `TransparencyThreshold` | Decimal | `0.1` | Minimum transparency % to keep PNG format (convert to JPEG if below) |
+| `TransparencyThresholdPercent` | Decimal | `0.1` | Minimum transparency % to keep PNG format (convert to JPEG if below). Range: 0.0-100.0 |
+| `CsvReportPath` | String | `<o>.opt-report.csv` | Path for the CSV report file |
 
 ---
 
@@ -547,6 +549,7 @@ Intelligent PNG handling:
 | ✅ | Success |
 | 🏁 | Completion |
 | 📉 | Size comparison |
+| 💾 | File save operation |
 
 ### Optimization Results
 
@@ -576,30 +579,41 @@ Each optimization run generates a detailed CSV report with the following columns
 | Column | Description |
 |--------|-------------|
 | `Location` | Where the image appears (e.g., "Slide 5", "Layout 1") |
-| `ObjectName` | PowerPoint shape name (e.g., "Picture 3") |
-| `ImageFile` | Media filename (e.g., "image5.jpg") |
-| `DisplaySize` | How large the image appears on slide (e.g., "415×233px") |
-| `OriginalFormat` | Original format (PNG, JPEG) |
-| `OriginalSize` | Original file size (human-readable) |
-| `HasCrop` | Whether PowerPoint crop was present (Yes/No) |
-| `CropRegion` | Crop percentages if present (e.g., "45.6%×54.7%") |
-| `HasTransparency` | Whether image has alpha channel (Yes/No) |
-| `TransparencyPercent` | Percentage of transparent pixels |
-| `Action` | What was done (e.g., "Cropped+Optimized", "Skipped") |
-| `FinalFormat` | Format after optimization |
-| `FinalSize` | File size after optimization |
-| `SavingsBytes` | Bytes saved |
-| `SavingsPercent` | Percentage saved (e.g., "71.8%") |
-| `Reason` | Why action was taken or skipped |
+| `ContextType` | Type of context: Slide, Layout, Master, Notes, or Handout |
+| `SlideNumber` | Slide number (0 for masters/layouts) |
+| `SlideModified` | Whether the slide XML was modified (Yes/No) |
+| `ShapeName` | PowerPoint shape name (e.g., "Picture 3") |
+| `SourceWidthPx` | Original image width in pixels |
+| `SourceHeightPx` | Original image height in pixels |
+| `DisplayWidthPx` | Display width on slide in pixels |
+| `DisplayHeightPx` | Display height on slide in pixels |
+| `TargetWidthPx` | Target width after applying headroom factor |
+| `TargetHeightPx` | Target height after applying headroom factor |
+| `OriginalFile` | Original media filename (e.g., "image5.png") |
+| `OptimizedFile` | Filename after optimization (may differ if format changed) |
+| `BeforeSizeBytes` | File size before optimization in bytes |
+| `AfterSizeBytes` | File size after optimization in bytes |
+| `Savings` | Human-readable savings (e.g., "443.4 KB (93.0%)") |
+| `HasSrcRect` | Whether PowerPoint crop was present (True/False) |
+| `CropApplied` | Whether physical crop was applied (Yes/No) |
+| `CropNormalized` | Whether crop values were normalized (Yes/No) |
+| `CropRemovedNoOp` | Whether a no-op crop was removed (Yes/No) |
+| `SvgFallback` | Whether this is an SVG fallback image (Yes/No) |
+| `OptimizationStatus` | Result status (e.g., "Optimized", "ConvertedPngToJpeg", "Skipped") |
+| `WhyNotOptimized` | Reason if skipped or rejected |
+| `HeadroomFactor` | Headroom factor used for this run |
+| `JpegQuality` | JPEG quality setting used for this run |
+| `TransparencyThresholdPercent` | Transparency threshold used for this run |
+| `EffectiveTransparencyPercent` | Actual transparency percentage detected in image |
+| `ManualActionRequired` | Whether manual intervention is recommended (Yes/No) |
+| `ManualActionHint` | Description of recommended manual action |
 
 **Example:**
 
 ```csv
-Location,ObjectName,ImageFile,DisplaySize,OriginalFormat,OriginalSize,HasCrop,CropRegion,HasTransparency,TransparencyPercent,Action,FinalFormat,FinalSize,SavingsBytes,SavingsPercent,Reason
-Slide 4,Picture 6,image4.png,350×236px,PNG,456.2 KB,Yes,45.6%×54.7%,Yes,0.0%,Cropped+Converted,JPEG,12.8 KB,443.4 KB,93.0%,Effective transparency below threshold
-Slide 5,Picture 3,image5.png,270×294px,PNG,789.3 KB,Yes,27.8%×49.2%,Yes,0.0%,Cropped+Converted,JPEG,18.5 KB,770.8 KB,90.6%,Effective transparency below threshold
-Slide 8,Picture 3,image8.png,684×420px,PNG,1.2 MB,No,,Yes,13.6%,Optimized,PNG,298.7 KB,901.3 KB,75.1%,PNG with transparency
-Slide 19,Picture 5,image12.jpg,256×144px,JPEG,10.2 KB,No,,No,0.0%,Kept Original,JPEG,10.2 KB,0 KB,0.0%,No net savings
+Location,ContextType,SlideNumber,SlideModified,ShapeName,SourceWidthPx,SourceHeightPx,DisplayWidthPx,DisplayHeightPx,TargetWidthPx,TargetHeightPx,OriginalFile,OptimizedFile,BeforeSizeBytes,AfterSizeBytes,Savings,HasSrcRect,CropApplied,CropNormalized,CropRemovedNoOp,SvgFallback,OptimizationStatus,WhyNotOptimized,HeadroomFactor,JpegQuality,TransparencyThresholdPercent,EffectiveTransparencyPercent,ManualActionRequired,ManualActionHint
+Slide 4,Slide,4,Yes,Picture 6,1920,1080,350,236,700,472,image4.png,image4.jpg,467148,13107,"443.4 KB (93.0%)",True,Yes,No,No,No,ConvertedPngToJpeg,,2,95,0.1,0.00,No,
+Slide 8,Slide,8,Yes,Picture 3,2400,1600,684,420,1368,840,image8.png,image8.png,1258291,305971,"901.3 KB (75.1%)",False,No,No,No,No,Optimized,,2,95,0.1,13.60,No,
 ```
 
 ---
@@ -708,6 +722,14 @@ Slide 19,Picture 5,image12.jpg,256×144px,JPEG,10.2 KB,No,,No,0.0%,Kept Original
 - Close PowerPoint before running the script
 - Ensure the file isn't open in another program
 - Check file permissions
+
+### "Output file is in use"
+
+The script checks if output files are accessible before processing. If the optimized PPTX or CSV report file is locked by another application (e.g., PowerPoint or Excel), the script will either fail early or preserve temporary files that you can manually copy.
+
+**Solution:**
+- Close the output file if it's open
+- Check the console output for temporary file locations
 
 ### "Optimized file is corrupt"
 
