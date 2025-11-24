@@ -244,7 +244,7 @@ Understanding when to use each format is crucial for **starting with an optimize
 ### Conversion Strategy
 
 This script intelligently converts PNG to JPEG when:
-- Transparency is below threshold (default 0.25%)
+- Transparency is below threshold (default 0.1%)
 - The conversion results in smaller file size
 - The image quality is maintained at specified JPEG quality (default 95%)
 
@@ -330,7 +330,7 @@ A well-constructed presentation with right-sized JPEGs and minimal transparency 
 
 3. **Format Conversion**
    - Analyzes PNG files for transparency
-   - Converts to JPEG when transparency < threshold (default 0.25%)
+   - Converts to JPEG when transparency < threshold (default 0.1%)
    - Ensures conversion doesn't increase file size ("no worse than before")
    - Maintains quality at specified level (default 95%)
 
@@ -458,7 +458,7 @@ The script automatically detects the OS and adjusts paths accordingly.
 | `OptimizeMastersAndLayouts` | Switch | `$false` | Resize/optimize images in master slides and layouts |
 | `HeadroomFactor` | Decimal | `2.0` | Multiplier for target dimensions (2.0 = 2× display size) |
 | `JpegQuality` | Int | `95` | JPEG quality for compression (1-100, higher = better quality) |
-| `TransparencyThreshold` | Decimal | `0.25` | Minimum transparency % to keep PNG format (convert to JPEG if below) |
+| `TransparencyThreshold` | Decimal | `0.1` | Minimum transparency % to keep PNG format (convert to JPEG if below) |
 
 ---
 
@@ -483,7 +483,7 @@ Intelligent PNG handling:
 - Counts actual transparent pixels (not just alpha channel presence)
 - Converts "fake transparency" PNGs to JPEG
 - Respects images with genuine transparency needs
-- Configurable threshold (default: 0.25% transparent pixels)
+- Configurable threshold (default: 0.1% transparent pixels)
 
 ### Cross-Platform
 

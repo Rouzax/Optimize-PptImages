@@ -84,7 +84,7 @@ param(
 
     [Parameter(Mandatory=$false)]
     [ValidateRange(0.0, 100.0)]
-    [double]$TransparencyThresholdPercent = 0.25,
+    [double]$TransparencyThresholdPercent = 0.1,
 
     [Parameter(Mandatory=$false)]
     [string]$CsvReportPath
