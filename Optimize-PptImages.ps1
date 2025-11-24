@@ -640,8 +640,6 @@ function Get-ImageUsages {
         $files = @(Get-ChildItem -Path $fullDir -Filter '*.xml' -File)
         if ($files.Count -eq 0) { continue }
         
-        $typeLabel = if ($dir -match 'Masters') { 'masters' } else { 'layouts' }
-        
         foreach ($file in $files) {
             $partPath = ($file.FullName -replace [regex]::Escape($tempDir + '\'), '').Replace('\', '/')
             $contextType = if ($partPath -match 'slideMasters') { 'Master' } else { 'Layout' }
