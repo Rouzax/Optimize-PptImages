@@ -36,9 +36,10 @@ A cross-platform PowerShell script that intelligently optimizes PowerPoint prese
     - [CSV Report](#csv-report)
     - [Exit Codes](#exit-codes)
   - [Example Results](#example-results)
-    - [Conservative (Resizing Only)](#conservative-resizing-only)
-    - [With Cropping](#with-cropping)
-    - [Maximum Optimization](#maximum-optimization)
+    - [Analysis Only (Default)](#analysis-only-default)
+    - [Optimize Slides (No Cropping)](#optimize-slides-no-cropping)
+    - [Optimize and Crop Slides](#optimize-and-crop-slides)
+    - [Full Optimization (Including Masters/Layouts)](#full-optimization-including-masterslayouts)
   - [Best Practices](#best-practices)
     - [Before Using This Script](#before-using-this-script)
     - [When This Script Helps Most](#when-this-script-helps-most)
@@ -64,17 +65,20 @@ A cross-platform PowerShell script that intelligently optimizes PowerPoint prese
 ## Quick Start
 
 ```powershell
-# Basic optimization (resizing only)
+# Analysis only (default - no changes, generates report)
 .\Optimize-PptImages.ps1 -InputPath "presentation.pptx"
 
-# Full optimization with cropping
-.\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -EnableCropping
+# Optimize slides (most common)
+.\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -OptimizeSlides
 
-# Maximum optimization (includes masters/layouts)
-.\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -EnableCropping -CropMastersAndLayouts -OptimizeMastersAndLayouts
+# Optimize with cropping
+.\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -OptimizeSlides -CropSlides
+
+# Full optimization (all slides, masters, layouts, with cropping)
+.\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -All
 
 # Batch process all PPTX files
-Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -EnableCropping
+Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -OptimizeSlides -CropSlides
 ```
 
 ---
@@ -175,46 +179,52 @@ magick --version
 ### Basic Examples
 
 ```powershell
-# Optimize with default settings (resizing only)
+# Analysis only (default - generates report, no image changes)
 .\Optimize-PptImages.ps1 -InputPath "MyPresentation.pptx"
 
-# Enable physical cropping for maximum savings
-.\Optimize-PptImages.ps1 -InputPath "MyPresentation.pptx" -EnableCropping
+# Optimize slides (resize and convert formats)
+.\Optimize-PptImages.ps1 -InputPath "MyPresentation.pptx" -OptimizeSlides
+
+# Optimize slides with cropping
+.\Optimize-PptImages.ps1 -InputPath "MyPresentation.pptx" -OptimizeSlides -CropSlides
+
+# Full optimization (everything enabled)
+.\Optimize-PptImages.ps1 -InputPath "MyPresentation.pptx" -All
 
 # Custom output location
-.\Optimize-PptImages.ps1 -InputPath "input.pptx" -OutputPath "output.pptx"
+.\Optimize-PptImages.ps1 -InputPath "input.pptx" -OutputPath "output.pptx" -OptimizeSlides
 
 # With verbose logging
-.\Optimize-PptImages.ps1 -InputPath "MyPresentation.pptx" -EnableCropping -Verbose
+.\Optimize-PptImages.ps1 -InputPath "MyPresentation.pptx" -OptimizeSlides -CropSlides -Verbose
 
 # Process only specific slides
-.\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -IncludeSlides 1,5,10 -EnableCropping
+.\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -IncludeSlides 1,5,10 -OptimizeSlides -CropSlides
 
 # Exclude certain slides
-.\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -ExcludeSlides 3,7 -EnableCropping
+.\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -ExcludeSlides 3,7 -OptimizeSlides
 
 # Custom quality settings
-.\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -HeadroomFactor 1.5 -JpegQuality 90
+.\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -OptimizeSlides -HeadroomFactor 1.5 -JpegQuality 90
 
 # Require minimum 10% savings to apply changes
-.\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -MinSavingsPercent 10
+.\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -OptimizeSlides -MinSavingsPercent 10
 ```
 
 ### Batch Processing
 
 ```powershell
 # Process all PPTX files in current directory
-Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -EnableCropping
+Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -OptimizeSlides -CropSlides
 
 # Process files matching pattern
-Get-ChildItem -Path "C:\Presentations" -Filter "Report*.pptx" | .\Optimize-PptImages.ps1 -EnableCropping
+Get-ChildItem -Path "C:\Presentations" -Filter "Report*.pptx" | .\Optimize-PptImages.ps1 -OptimizeSlides
 
 # Get results for programmatic use
-$results = Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -EnableCropping -PassThru
+$results = Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -OptimizeSlides -PassThru
 $results | Where-Object { $_.SavingsPercent -gt 50 } | Select-Object InputPath, SavingsPercent
 
 # Preview what would be processed (WhatIf)
-Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -EnableCropping -WhatIf
+Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -OptimizeSlides -WhatIf
 ```
 
 **Batch Output Example:**
@@ -236,18 +246,20 @@ Total savings:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `InputPath` | String | *Required* | Path to input PPTX/POTX file. Accepts pipeline input. |
-| `OutputPath` | String | `<name>.optimized.<ext>` | Path for optimized output file |
+| `OutputPath` | String | `<n>.optimized.<ext>` | Path for optimized output file |
 | `MagickPath` | String | Auto-detect | Path to ImageMagick `magick` executable |
-| `EnableCropping` | Switch | `$false` | Apply physical crops to images with PowerPoint crop attributes |
-| `CropMastersAndLayouts` | Switch | `$false` | Crop images in master slides and layouts (requires `-EnableCropping`) |
-| `OptimizeMastersAndLayouts` | Switch | `$false` | Resize/optimize images in master slides and layouts |
+| `OptimizeSlides` | Switch | `$false` | Resize and convert images in slides |
+| `OptimizeMastersAndLayouts` | Switch | `$false` | Resize and convert images in master slides and layouts |
+| `CropSlides` | Switch | `$false` | Apply physical crops to images in slides |
+| `CropMastersAndLayouts` | Switch | `$false` | Apply physical crops to images in master slides and layouts |
+| `All` | Switch | `$false` | Enable all optimization and cropping operations |
 | `HeadroomFactor` | Decimal | `2.0` | Target resolution multiplier (1.0-4.0). 2.0 = 2× display size |
 | `JpegQuality` | Int | `95` | JPEG quality for compression (1-100) |
 | `TransparencyThresholdPercent` | Decimal | `0.1` | Minimum transparency % to keep PNG format (0.0-100.0) |
 | `MinSavingsPercent` | Decimal | `0.0` | Minimum savings % required to apply optimization (0.0-50.0) |
 | `IncludeSlides` | Int[] | *None* | Only process these slide numbers |
 | `ExcludeSlides` | Int[] | *None* | Skip these slide numbers |
-| `CsvReportPath` | String | `<output>.opt-report.csv` | Path for CSV report file |
+| `CsvReportPath` | String | `<o>.opt-report.csv` | Path for CSV report file |
 | `PassThru` | Switch | `$false` | Return result object(s) to pipeline |
 
 **Note:** When using `-IncludeSlides` or `-ExcludeSlides`, all slides are still analyzed for correct shared image sizing and Morph detection—only the modification is filtered.
@@ -276,7 +288,7 @@ When you crop in PowerPoint's UI:
 2. Crop percentages are stored as XML (`srcRect` attributes)
 3. Only the visible portion renders, but all data is stored
 
-With `-EnableCropping`, this script physically removes the cropped portions.
+With `-CropSlides`, this script physically removes the cropped portions.
 
 ### Format Conversion
 
@@ -311,8 +323,8 @@ PowerPoint's three-tier hierarchy:
 3. **Slides** — Actual content based on layouts
 
 By default, the script **skips master/layout images** to avoid widespread changes. Enable with:
-- `-OptimizeMastersAndLayouts` — Resize/optimize
-- `-CropMastersAndLayouts` — Apply crops (requires `-EnableCropping`)
+- `-OptimizeMastersAndLayouts` — Resize and convert formats
+- `-CropMastersAndLayouts` — Apply physical crops
 
 ### Morph Transition Protection
 
@@ -438,8 +450,9 @@ Each run generates a detailed CSV report with these columns:
 | `OptimizedJpeg` | JPEG resized/recompressed |
 | `NoChangeNeeded` | Already at target size |
 | `Skipped_AlreadyOptimal` | Already at target size and quality |
-| `Skipped_SharedWithTemplatesFlagMissing` | In master/layout; enable `-OptimizeMastersAndLayouts` |
-| `Skipped_CropNotMaterialized` | Has crop; enable `-EnableCropping` |
+| `Skipped_SlidesFlagMissing` | In slide; enable `-OptimizeSlides` |
+| `Skipped_TemplatesFlagMissing` | In master/layout; enable `-OptimizeMastersAndLayouts` |
+| `Skipped_CropNotMaterialized` | Has crop; enable `-CropSlides` or `-CropMastersAndLayouts` |
 | `Skipped_MorphCropConflict` | Morph transition with conflicting crops |
 | `Skipped_SvgFallback` | SVG fallback PNG; PowerPoint regenerates |
 | `Skipped_UnsupportedFormat` | Unsupported format (EMF, WMF, SVG) |
@@ -458,7 +471,7 @@ Each run generates a detailed CSV report with these columns:
 
 ## Example Results
 
-### Conservative (Resizing Only)
+### Analysis Only (Default)
 
 ```powershell
 .\Optimize-PptImages.ps1 -InputPath "Test Deck.pptx"
@@ -466,39 +479,57 @@ Each run generates a detailed CSV report with these columns:
 
 | Metric | Value |
 |--------|-------|
-| Original | 59.56 MB |
-| Optimized | 51.99 MB |
-| **Saved** | **7.57 MB (12.7%)** |
+| Original | 63.91 MB |
+| Optimized | 63.84 MB |
+| **Saved** | **75 KB (0.1%)** |
 | Images cropped | 0 |
-| Images optimized | 10 |
+| Images optimized | 0 |
 
-### With Cropping
+*Savings from repack only. All images reported as skipped with hints for which flags to enable.*
+
+### Optimize Slides (No Cropping)
 
 ```powershell
-.\Optimize-PptImages.ps1 -InputPath "Test Deck.pptx" -EnableCropping -CropMastersAndLayouts
+.\Optimize-PptImages.ps1 -InputPath "Test Deck.pptx" -OptimizeSlides
 ```
 
 | Metric | Value |
 |--------|-------|
-| Original | 59.56 MB |
-| Optimized | 21.15 MB |
-| **Saved** | **38.42 MB (64.5%)** |
-| Images cropped | 5 |
-| Images optimized | 14 |
+| Original | 63.91 MB |
+| Optimized | 56.59 MB |
+| **Saved** | **7.32 MB (11.5%)** |
+| Images cropped | 0 |
+| Images optimized | 5 |
 
-### Maximum Optimization
+*Images with crops are skipped until `-CropSlides` is enabled.*
+
+### Optimize and Crop Slides
 
 ```powershell
-.\Optimize-PptImages.ps1 -InputPath "Test Deck.pptx" -EnableCropping -CropMastersAndLayouts -OptimizeMastersAndLayouts
+.\Optimize-PptImages.ps1 -InputPath "Test Deck.pptx" -OptimizeSlides -CropSlides
 ```
 
 | Metric | Value |
 |--------|-------|
-| Original | 59.56 MB |
-| Optimized | 3.26 MB |
-| **Saved** | **56.30 MB (94.5%)** |
+| Original | 63.91 MB |
+| Optimized | 34.90 MB |
+| **Saved** | **29.01 MB (45.4%)** |
 | Images cropped | 5 |
-| Images optimized | 17 |
+| Images optimized | 9 |
+
+### Full Optimization (Including Masters/Layouts)
+
+```powershell
+.\Optimize-PptImages.ps1 -InputPath "Test Deck.pptx" -All
+```
+
+| Metric | Value |
+|--------|-------|
+| Original | 63.91 MB |
+| Optimized | 6.56 MB |
+| **Saved** | **57.35 MB (89.7%)** |
+| Images cropped | 6 |
+| Images optimized | 12 |
 
 ---
 

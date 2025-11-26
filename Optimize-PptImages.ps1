@@ -18,14 +18,20 @@
 .PARAMETER MagickPath
     Path to ImageMagick 'magick' executable. If not specified, searches PATH.
 
-.PARAMETER EnableCropping
-    Allow materializing rectangular a:srcRect crops into physical images.
-
-.PARAMETER CropMastersAndLayouts
-    Requires -EnableCropping. Allows cropping images in masters/layouts.
+.PARAMETER OptimizeSlides
+    Allow resizing and format conversion of images in slides.
 
 .PARAMETER OptimizeMastersAndLayouts
-    Allow optimizing images in masters/layouts.
+    Allow resizing and format conversion of images in masters/layouts.
+
+.PARAMETER CropSlides
+    Allow materializing rectangular a:srcRect crops into physical images in slides.
+
+.PARAMETER CropMastersAndLayouts
+    Allow materializing rectangular a:srcRect crops into physical images in masters/layouts.
+
+.PARAMETER All
+    Enable all optimization and cropping operations.
 
 .PARAMETER HeadroomFactor
     Target resolution multiplier (display × factor). Default: 2.0. Range: 1.0-4.0
@@ -59,17 +65,20 @@
     PSCustomObject with optimization results including file sizes, savings, and counts.
 
 .EXAMPLE
-    .\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -EnableCropping
+    .\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -OptimizeSlides
 
 .EXAMPLE
-    .\Optimize-PptImages.ps1 -InputPath "template.potx" -EnableCropping -CropMastersAndLayouts -OptimizeMastersAndLayouts -HeadroomFactor 1.5
+    .\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -OptimizeSlides -CropSlides
 
 .EXAMPLE
-    Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -EnableCropping
+    .\Optimize-PptImages.ps1 -InputPath "template.potx" -All -HeadroomFactor 1.5
+
+.EXAMPLE
+    Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -OptimizeSlides -CropSlides
     # Batch process all PPTX files in current directory
 
 .EXAMPLE
-    .\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -IncludeSlides 1,5,10 -EnableCropping
+    .\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -IncludeSlides 1,5,10 -OptimizeSlides -CropSlides
     # Only process slides 1, 5, and 10
 
 .LINK
@@ -99,13 +108,19 @@ param(
     [string]$MagickPath,
 
     [Parameter(Mandatory=$false)]
-    [switch]$EnableCropping,
+    [switch]$OptimizeSlides,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$OptimizeMastersAndLayouts,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$CropSlides,
 
     [Parameter(Mandatory=$false)]
     [switch]$CropMastersAndLayouts,
 
     [Parameter(Mandatory=$false)]
-    [switch]$OptimizeMastersAndLayouts,
+    [switch]$All,
 
     [Parameter(Mandatory=$false)]
     [ValidateRange(1.0, 4.0)]
@@ -146,6 +161,19 @@ begin {
     $script:BatchResults = [System.Collections.Generic.List[PSCustomObject]]::new()
     $script:BatchMode = $false
     $script:FileCount = 0
+
+    # Expand -All flag into individual flags
+    if ($All) {
+        $script:OptimizeSlides = $true
+        $script:OptimizeMastersAndLayouts = $true
+        $script:CropSlides = $true
+        $script:CropMastersAndLayouts = $true
+    } else {
+        $script:OptimizeSlides = $OptimizeSlides.IsPresent
+        $script:OptimizeMastersAndLayouts = $OptimizeMastersAndLayouts.IsPresent
+        $script:CropSlides = $CropSlides.IsPresent
+        $script:CropMastersAndLayouts = $CropMastersAndLayouts.IsPresent
+    }
 
     #region Enums
 
@@ -394,11 +422,6 @@ begin {
         )
 
         # Returns: $null on success, or error message string on validation failure
-        
-        # Validate CropMastersAndLayouts requires EnableCropping
-        if ($CropMastersAndLayouts -and -not $EnableCropping) {
-            return "Parameter error: -CropMastersAndLayouts requires -EnableCropping"
-        }
 
         # Resolve paths
         $script:InputFile = Resolve-Path $InputPath
@@ -425,12 +448,12 @@ begin {
             Write-Verbose "  Input:  $script:InputFile"
             Write-Verbose "  Output: $script:OutputFile"
             Write-Verbose "  Report: $script:CsvReport"
+            Write-Verbose "Operations enabled:"
+            Write-Verbose "  OptimizeSlides: $script:OptimizeSlides"
+            Write-Verbose "  OptimizeMastersAndLayouts: $script:OptimizeMastersAndLayouts"
+            Write-Verbose "  CropSlides: $script:CropSlides"
+            Write-Verbose "  CropMastersAndLayouts: $script:CropMastersAndLayouts"
             Write-Verbose "Parameters:"
-            Write-Verbose "  EnableCropping: $EnableCropping"
-            if ($EnableCropping) {
-                Write-Verbose "  CropMastersAndLayouts: $CropMastersAndLayouts"
-            }
-            Write-Verbose "  OptimizeMastersAndLayouts: $OptimizeMastersAndLayouts"
             Write-Verbose "  HeadroomFactor: $HeadroomFactor"
             Write-Verbose "  JpegQuality: $JpegQuality"
             Write-Verbose "  TransparencyThreshold: $TransparencyThresholdPercent%"
@@ -447,8 +470,8 @@ begin {
         $slideFiltersActive = ($IncludeSlides -and $IncludeSlides.Count -gt 0) -or ($ExcludeSlides -and $ExcludeSlides.Count -gt 0)
         if ($slideFiltersActive) {
             $ignoredFlags = @()
-            if ($CropMastersAndLayouts) { $ignoredFlags += '-CropMastersAndLayouts' }
-            if ($OptimizeMastersAndLayouts) { $ignoredFlags += '-OptimizeMastersAndLayouts' }
+            if ($script:CropMastersAndLayouts) { $ignoredFlags += '-CropMastersAndLayouts' }
+            if ($script:OptimizeMastersAndLayouts) { $ignoredFlags += '-OptimizeMastersAndLayouts' }
             
             if ($ignoredFlags.Count -gt 0) {
                 Write-Host "⚠️  Note: $($ignoredFlags -join ', ') ignored when slide filters are active" -ForegroundColor DarkYellow
@@ -1709,26 +1732,27 @@ begin {
                 continue
             }
             
-            # Check if cropping is enabled
-            if (-not $EnableCropping) {
-                Write-Host "   ⏭️ Skipped crop for '$($usage.ShapeName)' on $($usage.Location): cropping disabled; enable -EnableCropping" -ForegroundColor Gray
-                $usage.OptimizationStatus = 'Skipped_CropNotMaterialized'
-                $usage.WhyNotOptimized = 'Cropping disabled; enable -EnableCropping'
-                $usage.ManualActionRequired = $true
-                $usage.ManualActionHint = 'Run with -EnableCropping'
-                $skippedCount++
-                continue
-            }
-            
-            # Check scope (masters/layouts)
-            if (($usage.ContextType -eq [ContextType]::Master -or $usage.ContextType -eq [ContextType]::Layout) -and -not $CropMastersAndLayouts) {
-                Write-Host "   ⏭️ Skipped crop for '$($usage.ShapeName)' on $($usage.Location): enable -CropMastersAndLayouts" -ForegroundColor Gray
-                $usage.OptimizationStatus = 'Skipped_CropNotMaterialized'
-                $usage.WhyNotOptimized = 'Master/Layout cropping disabled; enable -CropMastersAndLayouts'
-                $usage.ManualActionRequired = $true
-                $usage.ManualActionHint = 'Run with -EnableCropping -CropMastersAndLayouts'
-                $skippedCount++
-                continue
+            # Check if cropping is enabled for this context
+            if ($usage.ContextType -eq [ContextType]::Slide) {
+                if (-not $script:CropSlides) {
+                    Write-Host "   ⏭️ Skipped crop for '$($usage.ShapeName)' on $($usage.Location): enable -CropSlides" -ForegroundColor Gray
+                    $usage.OptimizationStatus = 'Skipped_CropNotMaterialized'
+                    $usage.WhyNotOptimized = 'Slide cropping disabled; enable -CropSlides'
+                    $usage.ManualActionRequired = $true
+                    $usage.ManualActionHint = 'Run with -CropSlides'
+                    $skippedCount++
+                    continue
+                }
+            } elseif ($usage.ContextType -eq [ContextType]::Master -or $usage.ContextType -eq [ContextType]::Layout) {
+                if (-not $script:CropMastersAndLayouts) {
+                    Write-Host "   ⏭️ Skipped crop for '$($usage.ShapeName)' on $($usage.Location): enable -CropMastersAndLayouts" -ForegroundColor Gray
+                    $usage.OptimizationStatus = 'Skipped_CropNotMaterialized'
+                    $usage.WhyNotOptimized = 'Master/Layout cropping disabled; enable -CropMastersAndLayouts'
+                    $usage.ManualActionRequired = $true
+                    $usage.ManualActionHint = 'Run with -CropMastersAndLayouts'
+                    $skippedCount++
+                    continue
+                }
             }
             
             # Check for no-op crop
@@ -2162,30 +2186,46 @@ begin {
             }
         }
         
-        # Check masters/layouts without opt-in
+        # Check if optimization is enabled for this context
+        $hasSlide = $group.Usages | Where-Object { $_.ContextType -eq [ContextType]::Slide }
         $hasTemplate = $group.Usages | Where-Object { $_.ContextType -in @([ContextType]::Master, [ContextType]::Layout) }
         
         $contextTypes = ($group.Usages | Select-Object -ExpandProperty ContextType -Unique) -join ', '
         $fileName = Split-Path $group.PhysicalPath -Leaf
-        Write-Verbose "  Checking skip reasons for $($fileName): contexts=[$contextTypes], hasTemplate=$($null -ne $hasTemplate), OptimizeMastersAndLayouts=$OptimizeMastersAndLayouts"
+        Write-Verbose "  Checking skip reasons for $($fileName): contexts=[$contextTypes], hasSlide=$($null -ne $hasSlide), hasTemplate=$($null -ne $hasTemplate), OptimizeSlides=$script:OptimizeSlides, OptimizeMastersAndLayouts=$script:OptimizeMastersAndLayouts"
         
-        if ($hasTemplate -and -not $OptimizeMastersAndLayouts) {
+        if ($hasSlide -and -not $script:OptimizeSlides) {
             return @{
-                Status = 'Skipped_SharedWithTemplatesFlagMissing'
+                Status = 'Skipped_SlidesFlagMissing'
+                Reason = 'Used in slide; enable -OptimizeSlides'
+                ManualAction = $true
+                Hint = 'Run with -OptimizeSlides'
+            }
+        }
+        
+        if ($hasTemplate -and -not $script:OptimizeMastersAndLayouts) {
+            return @{
+                Status = 'Skipped_TemplatesFlagMissing'
                 Reason = 'Used in master/layout; enable -OptimizeMastersAndLayouts'
                 ManualAction = $true
                 Hint = 'Run with -OptimizeMastersAndLayouts'
             }
         }
         
-        # Check unresolved crops
+        # Check unresolved crops - determine appropriate hint based on context
         $hasUnresolvedCrop = @($group.Usages | Where-Object { $_.HasSrcRect -and -not $_.CropApplied })
         if ($hasUnresolvedCrop.Count -gt 0) {
+            $firstUnresolved = $hasUnresolvedCrop[0]
+            $hint = if ($firstUnresolved.ContextType -in @([ContextType]::Master, [ContextType]::Layout)) {
+                'Run with -CropMastersAndLayouts'
+            } else {
+                'Run with -CropSlides'
+            }
             return @{
                 Status = 'Skipped_CropNotMaterialized'
-                Reason = 'Crop present; enable -EnableCropping'
+                Reason = 'Crop present; enable cropping'
                 ManualAction = $true
-                Hint = 'Run with -EnableCropping'
+                Hint = $hint
             }
         }
         
@@ -3141,8 +3181,8 @@ begin {
                 # Find Morph pairs
                 $morphPairs = Find-MorphPairs -usages $usages
                 
-                # Phase 1: Normalize crops (only if cropping enabled)
-                if ($EnableCropping) {
+                # Phase 1: Normalize crops (only if any cropping enabled)
+                if ($script:CropSlides -or $script:CropMastersAndLayouts) {
                     $docsToSave = @{}
                     $slideFiltersActive = ($IncludeSlides -and $IncludeSlides.Count -gt 0) -or ($ExcludeSlides -and $ExcludeSlides.Count -gt 0)
                     
@@ -3169,7 +3209,7 @@ begin {
                 }
                 
                 # Phase 2: Cropping
-                if ($EnableCropping) {
+                if ($script:CropSlides -or $script:CropMastersAndLayouts) {
                     Invoke-ImageCropping -usages $usages -tempDir $tempDir -morphPairs $morphPairs
                     
                     # Save XML changes
@@ -3385,7 +3425,7 @@ process {
     }
     
     if ($script:BatchMode -and $script:FileCount -gt 1) {
-        Write-Host ("`n" + ("=" * 60)) -ForegroundColor DarkGray
+        Write-Host "`n" + ("=" * 60) -ForegroundColor DarkGray
     }
     
     Write-Host "`n📂 Processing file $($script:FileCount): $(Split-Path $InputPath -Leaf)" -ForegroundColor Cyan
@@ -3397,7 +3437,7 @@ process {
 end {
     # Output results
     if ($script:BatchMode -and $script:BatchResults.Count -gt 1) {
-        Write-Host ("`n" + ("=" * 60)) -ForegroundColor DarkGray
+        Write-Host "`n" + ("=" * 60) -ForegroundColor DarkGray
         Write-Host "📊 BATCH SUMMARY" -ForegroundColor Cyan
         Write-Host ("=" * 60) -ForegroundColor DarkGray
         
