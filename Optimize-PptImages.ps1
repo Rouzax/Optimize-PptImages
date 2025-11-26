@@ -3385,7 +3385,7 @@ process {
     }
     
     if ($script:BatchMode -and $script:FileCount -gt 1) {
-        Write-Host "`n" + ("=" * 60) -ForegroundColor DarkGray
+        Write-Host ("`n" + ("=" * 60)) -ForegroundColor DarkGray
     }
     
     Write-Host "`n📂 Processing file $($script:FileCount): $(Split-Path $InputPath -Leaf)" -ForegroundColor Cyan
@@ -3397,7 +3397,7 @@ process {
 end {
     # Output results
     if ($script:BatchMode -and $script:BatchResults.Count -gt 1) {
-        Write-Host "`n" + ("=" * 60) -ForegroundColor DarkGray
+        Write-Host ("`n" + ("=" * 60)) -ForegroundColor DarkGray
         Write-Host "📊 BATCH SUMMARY" -ForegroundColor Cyan
         Write-Host ("=" * 60) -ForegroundColor DarkGray
         
