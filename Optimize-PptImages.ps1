@@ -2958,11 +2958,17 @@ begin {
             return $tempCsvPath
         }
         
-        # Sort by savings (descending), then context, then slide number
+        # Sort by context type (Slide, Layout, Master), then slide number, then layout/master number
         $sorted = $filteredUsages | Sort-Object @(
-            @{ Expression = { $_.BeforeSizeBytes - $_.AfterSizeBytes }; Descending = $true }
             @{ Expression = { $_.ContextType }; Ascending = $true }
             @{ Expression = { $_.SlideNumber }; Ascending = $true }
+            @{ Expression = { 
+                if ($_.PartPath -match '(\d+)\.xml$') { 
+                    [int]$matches[1] 
+                } else { 
+                    0 
+                }
+            }; Ascending = $true }
         )
         
         $rows = foreach ($usage in $sorted) {

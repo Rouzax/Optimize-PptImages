@@ -439,6 +439,8 @@ Each run generates a detailed CSV report with these columns:
 | `ManualActionRequired` | Whether manual intervention is recommended |
 | `ManualActionHint` | Suggested action |
 
+**Sort Order:** Rows are sorted by context type (Slides first, then Layouts, then Masters), then by slide number, then by layout/master number. This follows presentation order for easy reference.
+
 **Optimization Status Values:**
 
 | Status | Description |
