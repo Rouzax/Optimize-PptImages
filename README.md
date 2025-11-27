@@ -253,7 +253,7 @@ Total savings:
 | `CropSlides` | Switch | `$false` | Apply physical crops to images in slides |
 | `CropMastersAndLayouts` | Switch | `$false` | Apply physical crops to images in master slides and layouts |
 | `All` | Switch | `$false` | Enable all optimization and cropping operations |
-| `HeadroomFactor` | Decimal | `2.0` | Target resolution multiplier (1.0-4.0). 2.0 = 2× display size |
+| `HeadroomFactor` | Decimal | `2.0` | Target resolution multiplier (0.5-4.0). 2.0 = 2× display size |
 | `JpegQuality` | Int | `95` | JPEG quality for compression (1-100) |
 | `TransparencyThresholdPercent` | Decimal | `0.1` | Minimum transparency % to keep PNG format (0.0-100.0) |
 | `MinSavingsPercent` | Decimal | `0.0` | Minimum savings % required to apply optimization (0.0-50.0) |
