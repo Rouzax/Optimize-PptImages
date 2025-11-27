@@ -34,7 +34,7 @@
     Enable all optimization and cropping operations.
 
 .PARAMETER HeadroomFactor
-    Target resolution multiplier (display × factor). Default: 2.0. Range: 1.0-4.0
+    Target resolution multiplier (display × factor). Default: 2.0. Range: 0.5-4.0
 
 .PARAMETER JpegQuality
     JPEG quality for optimization. Default: 95. Range: 1-100
@@ -123,7 +123,7 @@ param(
     [switch]$All,
 
     [Parameter(Mandatory=$false)]
-    [ValidateRange(1.0, 4.0)]
+    [ValidateRange(0.5, 4.0)]
     [double]$HeadroomFactor = 2.0,
 
     [Parameter(Mandatory=$false)]
@@ -1014,6 +1014,36 @@ begin {
                     $usages.Add($usage)
                 }
             }
+            
+            # Process standalone blips (shape fills like Freeform, backgrounds, etc.)
+            $blips = $slideDoc.GetElementsByTagName('blip', 'http://schemas.openxmlformats.org/drawingml/2006/main')
+            
+            foreach ($blip in $blips) {
+                # Skip if this blip is already inside a <p:pic> (already processed above)
+                $parentPic = $blip
+                $isInsidePic = $false
+                while ($parentPic.ParentNode) {
+                    $parentPic = $parentPic.ParentNode
+                    if ($parentPic.LocalName -eq 'pic' -and $parentPic.NamespaceURI -eq 'http://schemas.openxmlformats.org/presentationml/2006/main') {
+                        $isInsidePic = $true
+                        break
+                    }
+                }
+                if ($isInsidePic) { continue }
+                
+                # Process standalone blip (shape fill, background, etc.)
+                $usage = Get-BlipUsage -blip $blip -rels $rels -contextType ([ContextType]::Slide) `
+                    -location "Slide $($slide.Number)" -tempDir $tempDir -partPath $slide.PartPath `
+                    -slideDocument $slideDoc -slideNumber $slide.Number -isMorphSlide $slide.IsMorphTransition
+                
+                if ($usage -and $usage.IsSvgFallbackUsage) {
+                    $null = $svgFallbackImages.Add($usage.ImagePhysicalPath)
+                }
+                
+                if ($usage) {
+                    $usages.Add($usage)
+                }
+            }
         }
         
         Write-Progress -Activity "Scanning for images" -Completed -Id 1
@@ -1273,7 +1303,9 @@ begin {
             [string]$location,
             [string]$tempDir,
             [string]$partPath,
-            [System.Xml.XmlDocument]$slideDocument
+            [System.Xml.XmlDocument]$slideDocument,
+            [int]$slideNumber = 0,
+            [bool]$isMorphSlide = $false
         )
         
         # Check for r:embed attribute
@@ -1305,36 +1337,151 @@ begin {
         # Check SVG fallback
         $svgCheck = Test-IsSvgFallback -blipElement $blip
         
-        # Determine shape name from parent element context
-        $shapeName = Get-BlipParentShapeName -blip $blip
-        
-        # Determine display dimensions based on context
-        # For background fills (bgPr), use slide dimensions
+        # Walk up the DOM to find parent shape and determine context
+        $shapeName = $null
         $displayWidth = 0
         $displayHeight = 0
         $isBackground = $false
+        $parentShape = $null
+        $xfrmElement = $null
         
-        # Check if this is a background fill by walking up the DOM
         $parent = $blip.ParentNode
         while ($parent -and $parent.NodeType -eq [System.Xml.XmlNodeType]::Element) {
-            if ($parent.LocalName -eq 'bgPr' -or $parent.LocalName -eq 'bg') {
+            $localName = $parent.LocalName
+            
+            # Check for background
+            if ($localName -eq 'bgPr' -or $localName -eq 'bg') {
                 $isBackground = $true
+                if ($script:SlideDimensions) {
+                    $displayWidth = $script:SlideDimensions.WidthPx
+                    $displayHeight = $script:SlideDimensions.HeightPx
+                }
+                $shapeName = 'Slide Background'
                 break
             }
+            
+            # Check for shape (sp) - this includes Freeform shapes
+            if ($localName -eq 'sp' -and $parent.NamespaceURI -eq 'http://schemas.openxmlformats.org/presentationml/2006/main') {
+                $parentShape = $parent
+                
+                # Get shape name from p:nvSpPr/p:cNvPr
+                $cNvPr = $parent.SelectSingleNode('p:nvSpPr/p:cNvPr', $script:NsMgr)
+                if ($cNvPr) {
+                    $shapeName = $cNvPr.GetAttribute('name')
+                }
+                
+                # Get dimensions from p:spPr/a:xfrm/a:ext
+                $spPr = $parent.SelectSingleNode('p:spPr', $script:NsMgr)
+                if ($spPr) {
+                    $xfrm = $spPr.SelectSingleNode('a:xfrm', $script:NsMgr)
+                    if ($xfrm) {
+                        $xfrmElement = $xfrm
+                        $ext = $xfrm.SelectSingleNode('a:ext', $script:NsMgr)
+                        if ($ext) {
+                            $cx = $ext.GetAttribute('cx')
+                            $cy = $ext.GetAttribute('cy')
+                            if ($cx) { $displayWidth = ConvertFrom-EMU -emu ([long]$cx) }
+                            if ($cy) { $displayHeight = ConvertFrom-EMU -emu ([long]$cy) }
+                        }
+                    }
+                }
+                break
+            }
+            
+            # Check for other shape types
+            if ($localName -eq 'cxnSp' -or $localName -eq 'grpSp') {
+                $parentShape = $parent
+                break
+            }
+            
             $parent = $parent.ParentNode
         }
         
-        if ($isBackground -and $script:SlideDimensions) {
-            $displayWidth = $script:SlideDimensions.WidthPx
-            $displayHeight = $script:SlideDimensions.HeightPx
-            Write-Verbose "    Background fill uses slide dimensions: ${displayWidth}×${displayHeight}px"
+        # Fallback shape name if not found
+        if (-not $shapeName) {
+            $shapeName = Get-BlipParentShapeName -blip $blip
+        }
+        
+        # Check for crop values - either srcRect or fillRect (with negative values)
+        # srcRect: positive values = percentage to crop from each edge
+        # fillRect: negative values = percentage image extends beyond shape (converts to srcRect equivalent)
+        $blipFill = $blip.ParentNode
+        $hasSrcRect = $false
+        $l = 0.0; $t = 0.0; $r = 0.0; $b = 0.0
+        
+        if ($blipFill -and $blipFill.LocalName -eq 'blipFill') {
+            # First check for srcRect (direct crop specification)
+            $srcRect = $blipFill.SelectSingleNode('a:srcRect', $script:NsMgr)
+            if ($srcRect) {
+                $hasSrcRect = $true
+                $lAttr = $srcRect.GetAttribute('l')
+                $tAttr = $srcRect.GetAttribute('t')
+                $rAttr = $srcRect.GetAttribute('r')
+                $bAttr = $srcRect.GetAttribute('b')
+                if ($lAttr) { $l = [double]$lAttr }
+                if ($tAttr) { $t = [double]$tAttr }
+                if ($rAttr) { $r = [double]$rAttr }
+                if ($bAttr) { $b = [double]$bAttr }
+            }
+            
+            # Check for fillRect with negative values (stretch crop)
+            # fillRect is inside a:stretch element
+            if (-not $hasSrcRect) {
+                $stretch = $blipFill.SelectSingleNode('a:stretch', $script:NsMgr)
+                if ($stretch) {
+                    $fillRect = $stretch.SelectSingleNode('a:fillRect', $script:NsMgr)
+                    if ($fillRect) {
+                        $fl = 0.0; $ft = 0.0; $fr = 0.0; $fb = 0.0
+                        $flAttr = $fillRect.GetAttribute('l')
+                        $ftAttr = $fillRect.GetAttribute('t')
+                        $frAttr = $fillRect.GetAttribute('r')
+                        $fbAttr = $fillRect.GetAttribute('b')
+                        if ($flAttr) { $fl = [double]$flAttr }
+                        if ($ftAttr) { $ft = [double]$ftAttr }
+                        if ($frAttr) { $fr = [double]$frAttr }
+                        if ($fbAttr) { $fb = [double]$fbAttr }
+                        
+                        # Negative fillRect values indicate a crop (image extends beyond shape)
+                        # Convert to srcRect-equivalent values
+                        # Formula: srcRect% = |fillRect%| / (100000 + |l| + |r|) * 100000 for horizontal
+                        #          srcRect% = |fillRect%| / (100000 + |t| + |b|) * 100000 for vertical
+                        # Values are in 1/1000ths of percent (100000 = 100%)
+                        
+                        if ($fl -lt 0 -or $fr -lt 0 -or $ft -lt 0 -or $fb -lt 0) {
+                            $hasSrcRect = $true
+                            
+                            # Convert negative fillRect to positive srcRect equivalent
+                            $absL = [Math]::Abs($fl)
+                            $absR = [Math]::Abs($fr)
+                            $absT = [Math]::Abs($ft)
+                            $absB = [Math]::Abs($fb)
+                            
+                            # Horizontal: total scale = 100% + left extension + right extension
+                            $horzScale = 100000 + $absL + $absR
+                            if ($horzScale -gt 100000) {
+                                $l = ($absL / $horzScale) * 100000
+                                $r = ($absR / $horzScale) * 100000
+                            }
+                            
+                            # Vertical: total scale = 100% + top extension + bottom extension
+                            $vertScale = 100000 + $absT + $absB
+                            if ($vertScale -gt 100000) {
+                                $t = ($absT / $vertScale) * 100000
+                                $b = ($absB / $vertScale) * 100000
+                            }
+                            
+                            Write-Verbose "    Converted fillRect (l=$fl, t=$ft, r=$fr, b=$fb) to srcRect equivalent (l=$([int]$l), t=$([int]$t), r=$([int]$r), b=$([int]$b))"
+                        }
+                    }
+                }
+            }
         }
         
         # Create usage object
         $usage = [ImageUsage]@{
             Location = $location
             ContextType = $contextType
-            SlideNumber = 0
+            SlideNumber = $slideNumber
             ShapeName = $shapeName
             ImagePhysicalPath = $mediaPath
             OriginalFileName = $mediaFile
@@ -1342,18 +1489,18 @@ begin {
             SourceHeightPx = 0
             DisplayWidthPx = $displayWidth
             DisplayHeightPx = $displayHeight
-            HasSrcRect = $false
-            SrcRectLeft = 0
-            SrcRectTop = 0
-            SrcRectRight = 0
-            SrcRectBottom = 0
-            IsMorphSlide = $false
+            HasSrcRect = $hasSrcRect
+            SrcRectLeft = $l
+            SrcRectTop = $t
+            SrcRectRight = $r
+            SrcRectBottom = $b
+            IsMorphSlide = $isMorphSlide
             MorphPair = $null
             IsSvgFallbackUsage = $svgCheck.IsSvgFallback
             BlipRId = $rId
             PartPath = $partPath
             BlipElement = $blip
-            XfrmElement = $null
+            XfrmElement = $xfrmElement
             BeforeSizeBytes = (Get-Item $mediaPath).Length
             AfterSizeBytes = 0
             CropApplied = $false
@@ -1373,7 +1520,14 @@ begin {
         
         if (Test-VerboseMode) {
             $svgFlag = if ($svgCheck.IsSvgFallback) { " [SVG-fallback]" } else { "" }
-            $dimInfo = if ($isBackground) { "[${displayWidth}×${displayHeight}px, background]" } else { "[background/fill]" }
+            $cropInfo = if ($hasSrcRect) { "crop" } else { "no crop" }
+            $dimInfo = if ($displayWidth -gt 0 -and $displayHeight -gt 0) { 
+                "[${displayWidth}×${displayHeight}px, $cropInfo]" 
+            } elseif ($isBackground) { 
+                "[${displayWidth}×${displayHeight}px, background]" 
+            } else { 
+                "[shape fill]" 
+            }
             Write-Verbose "  $location → '$shapeName': $mediaFile $dimInfo$svgFlag"
         }
         
@@ -1956,6 +2110,33 @@ begin {
                 $srcRect = $blipFill.SelectSingleNode('a:srcRect', $script:NsMgr)
                 if ($srcRect) {
                     $null = $srcRect.ParentNode.RemoveChild($srcRect)
+                }
+                
+                # Also reset fillRect if it has negative values (stretch crop)
+                # The crop has been materialized, so fillRect should be reset to no offset
+                $stretch = $blipFill.SelectSingleNode('a:stretch', $script:NsMgr)
+                if ($stretch) {
+                    $fillRect = $stretch.SelectSingleNode('a:fillRect', $script:NsMgr)
+                    if ($fillRect) {
+                        # Check if any attributes were negative (indicating crop)
+                        $hasNegative = $false
+                        foreach ($attr in @('l', 't', 'r', 'b')) {
+                            $val = $fillRect.GetAttribute($attr)
+                            if ($val -and [double]$val -lt 0) {
+                                $hasNegative = $true
+                                break
+                            }
+                        }
+                        
+                        if ($hasNegative) {
+                            # Remove all attributes to reset to default (no offset)
+                            $fillRect.RemoveAttribute('l')
+                            $fillRect.RemoveAttribute('t')
+                            $fillRect.RemoveAttribute('r')
+                            $fillRect.RemoveAttribute('b')
+                            Write-Verbose "    Reset fillRect attributes (crop materialized into image)"
+                        }
+                    }
                 }
             }
             
