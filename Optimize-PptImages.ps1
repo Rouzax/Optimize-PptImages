@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Optimizes PowerPoint presentations by cropping images and reducing file sizes.
 
@@ -3300,8 +3300,9 @@ begin {
                 $tempCsvPath = $null
                 $copyFailed = $true  # Assume failure until copy succeeds
                 
-                # Extract
-                Expand-Archive -Path $script:InputFile -DestinationPath $tempDir -Force
+                # Extract (use .NET ZipFile for PS 5.1 compatibility - Expand-Archive only accepts .zip extension)
+                Add-Type -Assembly 'System.IO.Compression.FileSystem' -ErrorAction SilentlyContinue
+                [System.IO.Compression.ZipFile]::ExtractToDirectory($script:InputFile, $tempDir)
                 
                 # Get canonical slide order
                 $slides = Get-CanonicalSlideOrder -tempDir $tempDir
