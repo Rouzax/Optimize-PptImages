@@ -1342,7 +1342,6 @@ begin {
         $displayWidth = 0
         $displayHeight = 0
         $isBackground = $false
-        $parentShape = $null
         $xfrmElement = $null
         
         $parent = $blip.ParentNode
@@ -1362,8 +1361,6 @@ begin {
             
             # Check for shape (sp) - this includes Freeform shapes
             if ($localName -eq 'sp' -and $parent.NamespaceURI -eq 'http://schemas.openxmlformats.org/presentationml/2006/main') {
-                $parentShape = $parent
-                
                 # Get shape name from p:nvSpPr/p:cNvPr
                 $cNvPr = $parent.SelectSingleNode('p:nvSpPr/p:cNvPr', $script:NsMgr)
                 if ($cNvPr) {
@@ -1388,9 +1385,8 @@ begin {
                 break
             }
             
-            # Check for other shape types
+            # Check for other shape types (cxnSp/grpSp don't contain images we can optimize)
             if ($localName -eq 'cxnSp' -or $localName -eq 'grpSp') {
-                $parentShape = $parent
                 break
             }
             
