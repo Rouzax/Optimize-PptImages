@@ -34,7 +34,7 @@
     Enable all optimization and cropping operations.
 
 .PARAMETER HeadroomFactor
-    Target resolution multiplier (display × factor). Default: 2.0. Range: 0.5-4.0
+    Target resolution multiplier (display x factor). Default: 2.0. Range: 0.5-4.0
 
 .PARAMETER JpegQuality
     JPEG quality for optimization. Default: 95. Range: 1-100
@@ -474,23 +474,23 @@ begin {
             if ($script:OptimizeMastersAndLayouts) { $ignoredFlags += '-OptimizeMastersAndLayouts' }
             
             if ($ignoredFlags.Count -gt 0) {
-                Write-Host "⚠️  Note: $($ignoredFlags -join ', ') ignored when slide filters are active" -ForegroundColor DarkYellow
+                Write-Host "[WARN]  Note: $($ignoredFlags -join ', ') ignored when slide filters are active" -ForegroundColor DarkYellow
                 Write-Host "   (Masters/layouts affect all slides, not just filtered selection)" -ForegroundColor DarkYellow
             }
         }
         
         # Check if output files are accessible (fail early)
         if (Test-FileInUse -Path $script:OutputFile) {
-            return "Output file is in use: $($script:OutputFile)`n  → Please close the file and try again."
+            return "Output file is in use: $($script:OutputFile)`n  -> Please close the file and try again."
         }
         if (Test-FileInUse -Path $script:CsvReport) {
-            return "CSV report file is in use: $($script:CsvReport)`n  → Please close the file (Excel?) and try again."
+            return "CSV report file is in use: $($script:CsvReport)`n  -> Please close the file (Excel?) and try again."
         }
 
         # Find ImageMagick
         $script:MagickExe = Find-ImageMagick -ProvidedPath $MagickPath
         if (-not $script:MagickExe) {
-            return "ImageMagick not found.`n  → Install ImageMagick and ensure 'magick' is in PATH, or use -MagickPath parameter."
+            return "ImageMagick not found.`n  -> Install ImageMagick and ensure 'magick' is in PATH, or use -MagickPath parameter."
         }
 
         Write-Verbose "ImageMagick: $script:MagickExe"
@@ -938,7 +938,7 @@ begin {
         $widthPx = ConvertFrom-EMU -emu ([long]$cx)
         $heightPx = ConvertFrom-EMU -emu ([long]$cy)
         
-        Write-Verbose "    Resolved placeholder dimensions from layout: ${widthPx}×${heightPx}px (idx=$placeholderIdx)"
+        Write-Verbose "    Resolved placeholder dimensions from layout: ${widthPx}x${heightPx}px (idx=$placeholderIdx)"
         
         return @{
             WidthPx = $widthPx
@@ -1279,7 +1279,7 @@ begin {
         if (Test-VerboseMode) {
             $cropInfo = if ($hasSrcRect) {
                 $crop = Get-CropPercentage -left $l -top $t -right $r -bottom $b
-                "crop [$($crop.WidthPercent.ToString('F1'))%×$($crop.HeightPercent.ToString('F1'))%] (l:$l t:$t r:$r b:$b)"
+                "crop [$($crop.WidthPercent.ToString('F1'))%x$($crop.HeightPercent.ToString('F1'))%] (l:$l t:$t r:$r b:$b)"
             } else {
                 "no crop"
             }
@@ -1289,7 +1289,7 @@ begin {
             if ($svgCheck.IsSvgFallback) { $flags += 'SVG-fallback' }
             $flagStr = if ($flags.Count -gt 0) { " [$($flags -join ', ')]" } else { "" }
             
-            Write-Verbose "  $location → '$shapeName': $($usage.OriginalFileName) [${displayWidth}×${displayHeight}px, $cropInfo]$flagStr"
+            Write-Verbose "  $location -> '$shapeName': $($usage.OriginalFileName) [${displayWidth}x${displayHeight}px, $cropInfo]$flagStr"
         }
         
         return $usage
@@ -1518,13 +1518,13 @@ begin {
             $svgFlag = if ($svgCheck.IsSvgFallback) { " [SVG-fallback]" } else { "" }
             $cropInfo = if ($hasSrcRect) { "crop" } else { "no crop" }
             $dimInfo = if ($displayWidth -gt 0 -and $displayHeight -gt 0) { 
-                "[${displayWidth}×${displayHeight}px, $cropInfo]" 
+                "[${displayWidth}x${displayHeight}px, $cropInfo]" 
             } elseif ($isBackground) { 
-                "[${displayWidth}×${displayHeight}px, background]" 
+                "[${displayWidth}x${displayHeight}px, background]" 
             } else { 
                 "[shape fill]" 
             }
-            Write-Verbose "  $location → '$shapeName': $mediaFile $dimInfo$svgFlag"
+            Write-Verbose "  $location -> '$shapeName': $mediaFile $dimInfo$svgFlag"
         }
         
         return $usage
@@ -1600,7 +1600,7 @@ begin {
             }
             
             if (Test-VerboseMode) {
-                Write-Verbose "Analyzing Morph transition: Slide $prevSlideNum → Slide $slideNum"
+                Write-Verbose "Analyzing Morph transition: Slide $prevSlideNum -> Slide $slideNum"
             }
             
             # Match by physical image path
@@ -1620,7 +1620,7 @@ begin {
                     
                     if (Test-VerboseMode) {
                         $fileName = Split-Path $match.ImagePhysicalPath -Leaf
-                        Write-Verbose "  Linked pair: $fileName across slides $prevSlideNum ↔ $slideNum"
+                        Write-Verbose "  Linked pair: $fileName across slides $prevSlideNum <-> $slideNum"
                     }
                 } else {
                     $unmatchedImages++
@@ -1633,7 +1633,7 @@ begin {
         }
         
         if ($morphSlideCount -gt 0) {
-            Write-Host "🔗 Morph detection: $morphSlideCount transition(s), $totalPairsFound image pair(s) linked" -ForegroundColor Cyan
+            Write-Host "[LINK] Morph detection: $morphSlideCount transition(s), $totalPairsFound image pair(s) linked" -ForegroundColor Cyan
             
             if (Test-VerboseMode) {
                 if ($unmatchedImages -gt 0) {
@@ -1760,7 +1760,7 @@ begin {
             $oldVal = $originalValues[$key]
             $newVal = Get-Variable -Name $key -ValueOnly
             if ($oldVal -ne $newVal) {
-                $changes += "${key}:${oldVal}→${newVal}"
+                $changes += "${key}:${oldVal}->${newVal}"
                 
                 # Build detailed explanation for verbose
                 $side = switch ($key) {
@@ -1778,12 +1778,12 @@ begin {
                     "was out of valid range [0-$($script:Config.CROP_THOUSANDTHS_MAX)]"
                 }
                 
-                $details += "  • $side edge: $oldVal → $newVal (was $reason)"
+                $details += "  * $side edge: $oldVal -> $newVal (was $reason)"
             }
         }
         
         if ($changes.Count -gt 0) {
-            Write-Host "📝 Corrected illegal crop values for '$($usage.ShapeName)' on $($usage.Location) ($($changes -join ', '))" -ForegroundColor Cyan
+            Write-Host "[NOTE] Corrected illegal crop values for '$($usage.ShapeName)' on $($usage.Location) ($($changes -join ', '))" -ForegroundColor Cyan
             
             if (Test-VerboseMode) {
                 Write-Verbose "Illegal crop correction details for '$($usage.ShapeName)':"
@@ -1797,8 +1797,8 @@ begin {
                     $off = $usage.XfrmElement.SelectSingleNode('a:off', $script:NsMgr)
                     if ($ext -and $off) {
                         Write-Verbose "  Adjusted shape transform (xfrm) to maintain visual appearance:"
-                        Write-Verbose "    • Position: x=$($off.GetAttribute('x')) EMU, y=$($off.GetAttribute('y')) EMU"
-                        Write-Verbose "    • Size: cx=$($ext.GetAttribute('cx')) EMU ($($usage.DisplayWidthPx)px), cy=$($ext.GetAttribute('cy')) EMU ($($usage.DisplayHeightPx)px)"
+                        Write-Verbose "    * Position: x=$($off.GetAttribute('x')) EMU, y=$($off.GetAttribute('y')) EMU"
+                        Write-Verbose "    * Size: cx=$($ext.GetAttribute('cx')) EMU ($($usage.DisplayWidthPx)px), cy=$($ext.GetAttribute('cy')) EMU ($($usage.DisplayHeightPx)px)"
                     }
                 }
                 
@@ -1820,7 +1820,7 @@ begin {
             [hashtable]$morphPairs
         )
         
-        Write-Host "`n✂️ Processing image crops..." -ForegroundColor Yellow
+        Write-Host "`n[CROP] Processing image crops..." -ForegroundColor Yellow
         
         $croppedCount = 0
         $skippedCount = 0
@@ -1863,7 +1863,7 @@ begin {
             
             # SVG fallback check
             if ($usage.IsSvgFallbackUsage) {
-                Write-Host "   ⏭️ Skipped crop for '$($usage.ShapeName)' on $($usage.Location): SVG fallback (PowerPoint regenerates)" -ForegroundColor Gray
+                Write-Host "   [SKIP] Skipped crop for '$($usage.ShapeName)' on $($usage.Location): SVG fallback (PowerPoint regenerates)" -ForegroundColor Gray
                 $usage.OptimizationStatus = 'Skipped_SvgFallback'
                 $usage.WhyNotOptimized = 'PNG is auto-generated SVG fallback; PowerPoint regenerates'
                 $usage.ManualActionRequired = $false
@@ -1874,7 +1874,7 @@ begin {
             # Animated GIF check - cropping would break animation
             $ext = [System.IO.Path]::GetExtension($usage.ImagePhysicalPath).ToLower()
             if ($ext -eq '.gif' -and (Test-IsAnimatedGif -ImagePath $usage.ImagePhysicalPath)) {
-                Write-Host "   ⏭️ Skipped crop for '$($usage.ShapeName)' on $($usage.Location): animated GIF (would break animation)" -ForegroundColor Gray
+                Write-Host "   [SKIP] Skipped crop for '$($usage.ShapeName)' on $($usage.Location): animated GIF (would break animation)" -ForegroundColor Gray
                 $usage.OptimizationStatus = 'Skipped_AnimatedGif'
                 $usage.WhyNotOptimized = 'Animated GIF - would break animation'
                 $usage.ManualActionRequired = $false
@@ -1885,7 +1885,7 @@ begin {
             # Check if cropping is enabled for this context
             if ($usage.ContextType -eq [ContextType]::Slide) {
                 if (-not $script:CropSlides) {
-                    Write-Host "   ⏭️ Skipped crop for '$($usage.ShapeName)' on $($usage.Location): enable -CropSlides" -ForegroundColor Gray
+                    Write-Host "   [SKIP] Skipped crop for '$($usage.ShapeName)' on $($usage.Location): enable -CropSlides" -ForegroundColor Gray
                     $usage.OptimizationStatus = 'Skipped_CropNotMaterialized'
                     $usage.WhyNotOptimized = 'Slide cropping disabled; enable -CropSlides'
                     $usage.ManualActionRequired = $true
@@ -1895,7 +1895,7 @@ begin {
                 }
             } elseif ($usage.ContextType -eq [ContextType]::Master -or $usage.ContextType -eq [ContextType]::Layout) {
                 if (-not $script:CropMastersAndLayouts) {
-                    Write-Host "   ⏭️ Skipped crop for '$($usage.ShapeName)' on $($usage.Location): enable -CropMastersAndLayouts" -ForegroundColor Gray
+                    Write-Host "   [SKIP] Skipped crop for '$($usage.ShapeName)' on $($usage.Location): enable -CropMastersAndLayouts" -ForegroundColor Gray
                     $usage.OptimizationStatus = 'Skipped_CropNotMaterialized'
                     $usage.WhyNotOptimized = 'Master/Layout cropping disabled; enable -CropMastersAndLayouts'
                     $usage.ManualActionRequired = $true
@@ -1916,7 +1916,7 @@ begin {
                 }
                 $usage.HasSrcRect = $false
                 $usage.CropRemovedNoOp = $true
-                Write-Host "   📝 Removed no-op crop for '$($usage.ShapeName)' on $($usage.Location) (full image)" -ForegroundColor Cyan
+                Write-Host "   [NOTE] Removed no-op crop for '$($usage.ShapeName)' on $($usage.Location) (full image)" -ForegroundColor Cyan
                 continue
             }
             
@@ -1927,7 +1927,7 @@ begin {
                 $pairHasMeaningful = $pair.HasSrcRect -and -not (Test-IsNoOpCrop -left $pair.SrcRectLeft -top $pair.SrcRectTop -right $pair.SrcRectRight -bottom $pair.SrcRectBottom)
                 
                 if ($usageHasMeaningful -or $pairHasMeaningful) {
-                    Write-Host "   🚫 Morph crop conflict for '$($usage.ShapeName)' across Slide $($pair.SlideNumber) ↔ $($usage.SlideNumber) (skipping crop & optimization)" -ForegroundColor Red
+                    Write-Host "   [BLOCK] Morph crop conflict for '$($usage.ShapeName)' across Slide $($pair.SlideNumber) <-> $($usage.SlideNumber) (skipping crop & optimization)" -ForegroundColor Red
                     $usage.OptimizationStatus = 'Skipped_MorphCropConflict'
                     $pair.OptimizationStatus = 'Skipped_MorphCropConflict'
                     $usage.WhyNotOptimized = 'Morph transition with crop conflict'
@@ -1943,7 +1943,7 @@ begin {
             
             # Validate crop geometry
             if (-not (Test-CropValidity -usage $usage)) {
-                Write-Host "🚫 Skipped crop for '$($usage.ShapeName)' on $($usage.Location): invalid crop geometry" -ForegroundColor Red
+                Write-Host "[BLOCK] Skipped crop for '$($usage.ShapeName)' on $($usage.Location): invalid crop geometry" -ForegroundColor Red
                 $usage.OptimizationStatus = 'Skipped_CropInvalidOrUnsafe'
                 $usage.WhyNotOptimized = 'Invalid crop geometry'
                 $usage.ManualActionRequired = $true
@@ -1964,7 +1964,7 @@ begin {
         }
         
         Write-Progress -Activity "Processing crops" -Completed -Id 2
-        Write-Host "📊 Cropping phase complete: $croppedCount cropped, $skippedCount skipped" -ForegroundColor Green
+        Write-Host "[STATS] Cropping phase complete: $croppedCount cropped, $skippedCount skipped" -ForegroundColor Green
     }
 
     function Test-CropValidity {
@@ -2031,7 +2031,7 @@ begin {
         }
         
         if (Test-VerboseMode) {
-            Write-Verbose "  Crop validation passed for '$($usage.ShapeName)': l=$l, t=$t, r=$r, b=$b → $($crop.WidthPercent.ToString('F1'))%×$($crop.HeightPercent.ToString('F1'))% of original"
+            Write-Verbose "  Crop validation passed for '$($usage.ShapeName)': l=$l, t=$t, r=$r, b=$b -> $($crop.WidthPercent.ToString('F1'))%x$($crop.HeightPercent.ToString('F1'))% of original"
         }
         
         return $true
@@ -2078,9 +2078,9 @@ begin {
             
             if (Test-VerboseMode) {
                 Write-Verbose "  Materializing crop for '$($usage.ShapeName)':"
-                Write-Verbose "    Source: ${srcWidth}×${srcHeight}px"
+                Write-Verbose "    Source: ${srcWidth}x${srcHeight}px"
                 Write-Verbose "    Crop values: l=$($usage.SrcRectLeft), t=$($usage.SrcRectTop), r=$($usage.SrcRectRight), b=$($usage.SrcRectBottom)"
-                Write-Verbose "    Resulting geometry: $cropGeometry (${cropWidth}×${cropHeight}px)"
+                Write-Verbose "    Resulting geometry: $cropGeometry (${cropWidth}x${cropHeight}px)"
             }
             
             & $script:MagickExe $usage.ImagePhysicalPath -crop $cropGeometry +repage $outputPath 2>&1 | Out-Null
@@ -2094,7 +2094,7 @@ begin {
             $savedPercent = (($beforeSize - $afterSize) / $beforeSize) * 100
             
             if (Test-VerboseMode) {
-                Write-Verbose "    Output: $outputName [$(Format-ByteSize $beforeSize) → $(Format-ByteSize $afterSize), saved $($savedPercent.ToString('F1'))%]"
+                Write-Verbose "    Output: $outputName [$(Format-ByteSize $beforeSize) -> $(Format-ByteSize $afterSize), saved $($savedPercent.ToString('F1'))%]"
             }
             
             # Update relationship
@@ -2147,7 +2147,7 @@ begin {
             }
             
             $savedPercent = (($beforeSize - $afterSize) / $beforeSize) * 100
-            Write-Host "   ✂️ Cropped '$($usage.ShapeName)' on $($usage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
+            Write-Host "   [CROP] Cropped '$($usage.ShapeName)' on $($usage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
             
             return @{ Success = $true }
             
@@ -2171,7 +2171,7 @@ begin {
             [hashtable]$morphPairs
         )
         
-        Write-Host "`n⚙️ Optimizing images..." -ForegroundColor Yellow
+        Write-Host "`n[PROC] Optimizing images..." -ForegroundColor Yellow
         
         # Group by physical image
         $imageGroups = @{}
@@ -2259,7 +2259,7 @@ begin {
                 }
                 # Log first included usage as representative
                 $firstUsage = $hasIncludedUsage | Select-Object -First 1
-                Write-Host "   ⏭️ Skipped optimization for '$($firstUsage.ShapeName)' on $($firstUsage.Location): $($skipReason.Reason)" -ForegroundColor Gray
+                Write-Host "   [SKIP] Skipped optimization for '$($firstUsage.ShapeName)' on $($firstUsage.Location): $($skipReason.Reason)" -ForegroundColor Gray
                 $skippedCount += $group.Usages.Count
                 continue
             }
@@ -2273,7 +2273,7 @@ begin {
             $firstUsage = $hasIncludedUsage | Select-Object -First 1
             
             if ($PSCmdlet.ShouldProcess($mediaFile, "Optimize image")) {
-                Write-Verbose "Optimizing $mediaFile [display: $($maxDisplay.Width)×$($maxDisplay.Height)px] from $($firstUsage.Location)"
+                Write-Verbose "Optimizing $mediaFile [display: $($maxDisplay.Width)x$($maxDisplay.Height)px] from $($firstUsage.Location)"
                 
                 $result = Invoke-OptimizationOperation -group $group -maxDisplay $maxDisplay -tempDir $tempDir
                 if ($result.Success) {
@@ -2285,7 +2285,7 @@ begin {
         }
         
         Write-Progress -Activity "Optimizing images" -Completed -Id 3
-        Write-Host "📊 Optimization phase complete: $optimizedCount optimized, $skippedCount skipped" -ForegroundColor Green
+        Write-Host "[STATS] Optimization phase complete: $optimizedCount optimized, $skippedCount skipped" -ForegroundColor Green
     }
 
     function Get-OptimizationSkipReason {
@@ -2443,7 +2443,7 @@ begin {
                 $usage.TargetHeightPx = $targetHeight
             }
             
-            Write-Verbose "  Dimensions: source ${srcWidth}×${srcHeight}px → target ${targetWidth}×${targetHeight}px [HeadroomFactor: $HeadroomFactor]"
+            Write-Verbose "  Dimensions: source ${srcWidth}x${srcHeight}px -> target ${targetWidth}x${targetHeight}px [HeadroomFactor: $HeadroomFactor]"
             
             # Check JPEG quality for quality preservation
             $ext = [System.IO.Path]::GetExtension($group.PhysicalPath).ToLower()
@@ -2462,7 +2462,7 @@ begin {
                         $usage.WhyNotOptimized = "Already at optimal quality (Q$sourceQuality <= Q$JpegQuality) and target size"
                         $usage.ManualActionRequired = $false
                     }
-                    Write-Host "   ⏭️ Skipped '$($firstUsage.ShapeName)' on $($firstUsage.Location): already at target size and quality (Q$sourceQuality)" -ForegroundColor Gray
+                    Write-Host "   [SKIP] Skipped '$($firstUsage.ShapeName)' on $($firstUsage.Location): already at target size and quality (Q$sourceQuality)" -ForegroundColor Gray
                     return @{ Success = $false }
                 }
             }
@@ -2485,7 +2485,7 @@ begin {
                     if ($transp -le $TransparencyThresholdPercent) {
                         # Opaque - convert PNG to JPEG
                         $firstUsage = $group.Usages[0]
-                        Write-Host "   ℹ️ Effective transparency $($transp.ToString('F1'))% for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - treating as opaque" -ForegroundColor Cyan
+                        Write-Host "   [INFO] Effective transparency $($transp.ToString('F1'))% for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - treating as opaque" -ForegroundColor Cyan
                         $result = ConvertTo-Jpeg -group $group -tempDir $tempDir -resize $false
                         return $result
                     }
@@ -2497,7 +2497,7 @@ begin {
                     $usage.WhyNotOptimized = 'Already at target size'
                     $usage.ManualActionRequired = $false
                 }
-                Write-Host "   ⏭️ No change needed for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (already at target)" -ForegroundColor Gray
+                Write-Host "   [SKIP] No change needed for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (already at target)" -ForegroundColor Gray
                 return @{ Success = $false }
             }
             
@@ -2514,7 +2514,7 @@ begin {
                 if ($transp -le $TransparencyThresholdPercent) {
                     # Opaque or negligible transparency - convert to JPEG
                     $firstUsage = $group.Usages[0]
-                    Write-Host "   ℹ️ Effective transparency $($transp.ToString('F1'))% for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - treating as opaque" -ForegroundColor Cyan
+                    Write-Host "   [INFO] Effective transparency $($transp.ToString('F1'))% for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - treating as opaque" -ForegroundColor Cyan
                     $result = ConvertTo-Jpeg -group $group -tempDir $tempDir -resize $true
                 } else {
                     # Has meaningful transparency - keep as PNG
@@ -2556,7 +2556,7 @@ begin {
             
             if (Test-VerboseMode) {
                 $decision = if ($transp -le $TransparencyThresholdPercent) { "opaque (can convert to JPEG)" } else { "transparent (keep as PNG)" }
-                Write-Verbose "  Transparency analysis for $($fileName): $($transp.ToString('F2'))% transparent pixels → $decision"
+                Write-Verbose "  Transparency analysis for $($fileName): $($transp.ToString('F2'))% transparent pixels -> $decision"
             }
             
             return $transp
@@ -2596,7 +2596,7 @@ begin {
             [string]$tempDir
         )
         
-        Write-Verbose "  Optimizing JPEG: target ${targetWidth}×${targetHeight}px, quality $JpegQuality"
+        Write-Verbose "  Optimizing JPEG: target ${targetWidth}x${targetHeight}px, quality $JpegQuality"
         
         $outputPath = "$($group.PhysicalPath).tmp"
         
@@ -2640,10 +2640,10 @@ begin {
             }
             
             if (Test-VerboseMode) {
-                Write-Verbose "  JPEG optimization rejected: $(Format-ByteSize $beforeSize) → $(Format-ByteSize $afterSize)"
+                Write-Verbose "  JPEG optimization rejected: $(Format-ByteSize $beforeSize) -> $(Format-ByteSize $afterSize)"
             }
             
-            Write-Host "   ℹ️ $reason for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - kept original" -ForegroundColor Cyan
+            Write-Host "   [INFO] $reason for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - kept original" -ForegroundColor Cyan
             return @{ Success = $false }
         }
         
@@ -2659,7 +2659,7 @@ begin {
             $usage.OptimizationStatus = 'OptimizedJpeg'
         }
         
-        Write-Host "   ✅ Optimized JPEG for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
+        Write-Host "   [OK] Optimized JPEG for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
         
         return @{ Success = $true }
     }
@@ -2672,7 +2672,7 @@ begin {
             [string]$tempDir
         )
         
-        Write-Verbose "  Optimizing PNG with transparency: target ${targetWidth}×${targetHeight}px, compression level $($script:Config.PNG_COMPRESSION_LEVEL)"
+        Write-Verbose "  Optimizing PNG with transparency: target ${targetWidth}x${targetHeight}px, compression level $($script:Config.PNG_COMPRESSION_LEVEL)"
         
         $outputPath = "$($group.PhysicalPath).tmp"
         
@@ -2714,10 +2714,10 @@ begin {
             }
             
             if (Test-VerboseMode) {
-                Write-Verbose "  PNG optimization rejected: $(Format-ByteSize $beforeSize) → $(Format-ByteSize $afterSize)"
+                Write-Verbose "  PNG optimization rejected: $(Format-ByteSize $beforeSize) -> $(Format-ByteSize $afterSize)"
             }
             
-            Write-Host "   ℹ️ $reason for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - kept original" -ForegroundColor Cyan
+            Write-Host "   [INFO] $reason for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - kept original" -ForegroundColor Cyan
             return @{ Success = $false }
         }
         
@@ -2733,7 +2733,7 @@ begin {
             $usage.OptimizationStatus = 'OptimizedPngAlpha'
         }
         
-        Write-Host "   ✅ Optimized PNG with transparency for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
+        Write-Host "   [OK] Optimized PNG with transparency for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
         
         return @{ Success = $true }
     }
@@ -2746,7 +2746,7 @@ begin {
         )
         
         $srcFile = Split-Path $group.PhysicalPath -Leaf
-        Write-Verbose "  Converting PNG→JPEG: $srcFile [resize: $resize, quality: $JpegQuality]"
+        Write-Verbose "  Converting PNG->JPEG: $srcFile [resize: $resize, quality: $JpegQuality]"
         
         # Generate unique JPEG filename
         $output = New-UniqueMediaPath -basePath $group.PhysicalPath -suffix '' -newExtension '.jpeg'
@@ -2800,10 +2800,10 @@ begin {
             }
             
             if (Test-VerboseMode) {
-                Write-Verbose "  PNG→JPEG conversion rejected: $(Format-ByteSize $beforeSize) → $(Format-ByteSize $afterSize)"
+                Write-Verbose "  PNG->JPEG conversion rejected: $(Format-ByteSize $beforeSize) -> $(Format-ByteSize $afterSize)"
             }
             
-            Write-Host "   ℹ️ $reason for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - kept original" -ForegroundColor Cyan
+            Write-Host "   [INFO] $reason for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - kept original" -ForegroundColor Cyan
             return @{ Success = $false }
         }
         
@@ -2825,7 +2825,7 @@ begin {
         
         $savedPercent = (($beforeSize - $afterSize) / $beforeSize) * 100
         $firstUsage = $group.Usages[0]
-        Write-Host "   🔁 Converted PNG to JPEG for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
+        Write-Host "   [CONV] Converted PNG to JPEG for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
         
         return @{ Success = $true }
     }
@@ -2852,17 +2852,17 @@ begin {
             
             if ($hasTransparency) {
                 $firstUsage = $group.Usages[0]
-                Write-Host "   ℹ️ Effective transparency $($transp.ToString('F1').Replace('.', ','))% for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - keeping as PNG" -ForegroundColor Cyan
+                Write-Host "   [INFO] Effective transparency $($transp.ToString('F1').Replace('.', ','))% for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - keeping as PNG" -ForegroundColor Cyan
             } else {
                 $firstUsage = $group.Usages[0]
-                Write-Host "   ℹ️ Effective transparency $($transp.ToString('F1').Replace('.', ','))% for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - treating as opaque" -ForegroundColor Cyan
+                Write-Host "   [INFO] Effective transparency $($transp.ToString('F1').Replace('.', ','))% for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - treating as opaque" -ForegroundColor Cyan
             }
         }
         
         # Determine output format
         $outputExt = if ($hasTransparency) { '.png' } else { '.jpeg' }
         
-        Write-Verbose "  Converting $ext→$($outputExt): $srcFile [target: ${targetWidth}×${targetHeight}px]"
+        Write-Verbose "  Converting $ext->$($outputExt): $srcFile [target: ${targetWidth}x${targetHeight}px]"
         
         # Generate unique filename
         $output = New-UniqueMediaPath -basePath $group.PhysicalPath -suffix '' -newExtension $outputExt
@@ -2919,7 +2919,7 @@ begin {
                 $usage.ManualActionRequired = $false
             }
             
-            Write-Host "   ℹ️ $reason for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - kept original" -ForegroundColor Cyan
+            Write-Host "   [INFO] $reason for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - kept original" -ForegroundColor Cyan
             return @{ Success = $false }
         }
         
@@ -2943,7 +2943,7 @@ begin {
         
         $savedPercent = (($beforeSize - $afterSize) / $beforeSize) * 100
         $firstUsage = $group.Usages[0]
-        Write-Host "   🔁 Converted $ext to $outputExt for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
+        Write-Host "   [CONV] Converted $ext to $outputExt for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
         
         return @{ Success = $true }
     }
@@ -2955,7 +2955,7 @@ begin {
     function Invoke-MediaCleanup {
         param([string]$tempDir)
         
-        Write-Host "`n🧹 Cleaning up unreferenced media..." -ForegroundColor Yellow
+        Write-Host "`n[CLEAN] Cleaning up unreferenced media..." -ForegroundColor Yellow
         
         # Collect all referenced media paths
         $referenced = [System.Collections.Generic.HashSet[string]]::new()
@@ -3001,7 +3001,7 @@ begin {
                 }
             }
             
-            Write-Host "🧹 Media files removed: $deletedCount" -ForegroundColor Green
+            Write-Host "[CLEAN] Media files removed: $deletedCount" -ForegroundColor Green
         }
     }
 
@@ -3033,7 +3033,7 @@ begin {
                 [void]$default.SetAttribute('Extension', $ext)
                 [void]$default.SetAttribute('ContentType', $requiredDefaults[$ext])
                 $null = $doc.DocumentElement.AppendChild($default)
-                Write-Verbose "  Added content type: .$ext → $($requiredDefaults[$ext])"
+                Write-Verbose "  Added content type: .$ext -> $($requiredDefaults[$ext])"
                 $addedCount++
             }
         }
@@ -3050,7 +3050,7 @@ begin {
             [string]$tempDir
         )
         
-        Write-Host "`n📦 Repacking presentation..." -ForegroundColor Yellow
+        Write-Host "`n[PACK] Repacking presentation..." -ForegroundColor Yellow
         Write-Verbose "Creating optimized ZIP archive from: $tempDir"
         
         # Create temp file for output (outside the extraction temp dir)
@@ -3087,7 +3087,7 @@ begin {
                 throw "Output file is empty: $tempOutputPath"
             }
             
-            Write-Host "✅ Repacked: $([Math]::Round($fileInfo.Length / 1KB, 2)) KB" -ForegroundColor Green
+            Write-Host "[OK] Repacked: $([Math]::Round($fileInfo.Length / 1KB, 2)) KB" -ForegroundColor Green
             
             return $tempOutputPath
             
@@ -3105,7 +3105,7 @@ begin {
             [System.Collections.Generic.List[ImageUsage]]$usages
         )
         
-        Write-Host "`n📄 Generating CSV report..." -ForegroundColor Yellow
+        Write-Host "`n[CSV] Generating report..." -ForegroundColor Yellow
         
         # Create temp file for CSV (outside the extraction temp dir)
         $tempCsvPath = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "ppt-opt-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).csv")
@@ -3185,7 +3185,7 @@ begin {
         }
         
         $rows | Export-Csv -Path $tempCsvPath -NoTypeInformation -Encoding UTF8
-        Write-Host "✅ CSV report generated" -ForegroundColor Green
+        Write-Host "[OK] CSV report generated" -ForegroundColor Green
         
         return $tempCsvPath
     }
@@ -3219,7 +3219,7 @@ begin {
                 }
                 Copy-Item -LiteralPath $tempPptxPath -Destination $finalPptxPath -Force
                 $result.PptxSuccess = $true
-                Write-Host "📁 Output: $finalPptxPath" -ForegroundColor Green
+                Write-Host "[OUT] Output: $finalPptxPath" -ForegroundColor Green
             }
         } catch {
             Write-Warning "Failed to copy PPTX to final destination: $_"
@@ -3235,7 +3235,7 @@ begin {
                 }
                 Copy-Item -LiteralPath $tempCsvPath -Destination $finalCsvPath -Force
                 $result.CsvSuccess = $true
-                Write-Host "📊 Report: $finalCsvPath" -ForegroundColor Green
+                Write-Host "[OUT] Report: $finalCsvPath" -ForegroundColor Green
             }
         } catch {
             Write-Warning "Failed to copy CSV to final destination: $_"
@@ -3254,13 +3254,13 @@ begin {
         $exitCode = 0
         
         try {
-            Write-Host "🔎 Analyzing presentation structure..." -ForegroundColor Cyan
+            Write-Host "[SCAN] Analyzing presentation structure..." -ForegroundColor Cyan
             Write-Host "   File: $CurrentInputPath" -ForegroundColor Gray
             
             # Initialize and validate
             $validationError = Initialize-Script -InputPath $CurrentInputPath -MagickPath $MagickPath
             if ($validationError) {
-                Write-Host "`n❌ $validationError" -ForegroundColor Red
+                Write-Host "`n[ERROR] $validationError" -ForegroundColor Red
                 return [PSCustomObject]@{
                     InputPath = $CurrentInputPath
                     OutputPath = $null
@@ -3310,7 +3310,7 @@ begin {
                 
                 # Get slide dimensions for background image sizing
                 $script:SlideDimensions = Get-SlideDimensions -tempDir $tempDir
-                Write-Verbose "Slide dimensions: $($script:SlideDimensions.WidthPx)×$($script:SlideDimensions.HeightPx)px"
+                Write-Verbose "Slide dimensions: $($script:SlideDimensions.WidthPx)x$($script:SlideDimensions.HeightPx)px"
                 
                 # Scan for image usages
                 $usages = Get-ImageUsages -tempDir $tempDir -slides $slides
@@ -3319,16 +3319,16 @@ begin {
                     $usages = [System.Collections.Generic.List[ImageUsage]]::new()
                 }
                 
-                Write-Host "📊 Found $($usages.Count) image usages" -ForegroundColor Cyan
+                Write-Host "[STATS] Found $($usages.Count) image usages" -ForegroundColor Cyan
                 $uniqueImages = if ($usages.Count -gt 0) { 
                     ($usages | Select-Object -Property ImagePhysicalPath -Unique).Count 
                 } else { 
                     0 
                 }
-                Write-Host "📊 Across $uniqueImages unique images" -ForegroundColor Cyan
+                Write-Host "[STATS] Across $uniqueImages unique images" -ForegroundColor Cyan
                 
                 if ($usages.Count -eq 0) {
-                    Write-Host "`nℹ️ No images found to optimize" -ForegroundColor Yellow
+                    Write-Host "`n[INFO] No images found to optimize" -ForegroundColor Yellow
                     
                     # Still create output file and empty CSV
                     Copy-Item $script:InputFile $script:OutputFile
@@ -3336,7 +3336,7 @@ begin {
                     $emptyReport = @()
                     $emptyReport | Export-Csv -Path $script:CsvReport -NoTypeInformation -Encoding UTF8
                     
-                    Write-Host "`n🏁 Complete (no changes needed)" -ForegroundColor Green
+                    Write-Host "`n[DONE] Complete (no changes needed)" -ForegroundColor Green
                     Write-Host "Output: $script:OutputFile" -ForegroundColor Green
                     Write-Host "Report: $script:CsvReport" -ForegroundColor Green
                     
@@ -3426,7 +3426,7 @@ begin {
                 }
                 
                 if ($docsToSave.Count -gt 0) {
-                    Write-Host "💾 Saving $($docsToSave.Count) updated document(s)..." -ForegroundColor Yellow
+                    Write-Host "[SAVE] Saving $($docsToSave.Count) updated document(s)..." -ForegroundColor Yellow
                     foreach ($path in $docsToSave.Keys) {
                         try {
                             $relativePath = $path -replace [regex]::Escape($tempDir + '\'), ''
@@ -3464,7 +3464,7 @@ begin {
                     if (-not (Test-Path -LiteralPath $filePath)) {
                         throw "Critical file missing before repack: $file"
                     }
-                    Write-Verbose "  ✓ $file"
+                    Write-Verbose "  [v] $file"
                 }
                 Write-Verbose "Pre-repack validation passed - all critical files present"
                 
@@ -3484,16 +3484,16 @@ begin {
                 $optimizedCount = @($usages | Where-Object { $_.OptimizationStatus -match '^(Optimized|Converted)' } | Select-Object -Property OriginalFileName -Unique).Count
                 $skippedCount = @($usages | Where-Object { $_.OptimizationStatus -match '^Skipped' -or $_.OptimizationStatus -eq 'NoChangeNeeded' }).Count
                 
-                Write-Host "`n🏁 Optimization Complete" -ForegroundColor Green
-                Write-Host "📊 Images cropped: $croppedCount" -ForegroundColor Green
-                Write-Host "📊 Images optimized: $optimizedCount" -ForegroundColor Green
-                Write-Host "`n📉 File size:" -ForegroundColor Green
+                Write-Host "`n[DONE] Optimization Complete" -ForegroundColor Green
+                Write-Host "[STATS] Images cropped: $croppedCount" -ForegroundColor Green
+                Write-Host "[STATS] Images optimized: $optimizedCount" -ForegroundColor Green
+                Write-Host "`n[SIZE] File size:" -ForegroundColor Green
                 Write-Host "  Original: $((Format-ByteSize $originalSize))" -ForegroundColor Green
                 Write-Host "  Optimized: $((Format-ByteSize $optimizedSize))" -ForegroundColor Green
                 Write-Host "  Saved: $(Format-ByteSize $savedBytes) ($($savedPercent.ToString('F1'))%)" -ForegroundColor Green
                 
                 # Phase 6: Copy to final destinations
-                Write-Host "`n💾 Saving output files..." -ForegroundColor Yellow
+                Write-Host "`n[SAVE] Saving output files..." -ForegroundColor Yellow
                 $copyResult = Copy-OutputFilesToFinal `
                     -tempPptxPath $tempPptxPath `
                     -tempCsvPath $tempCsvPath `
@@ -3503,14 +3503,14 @@ begin {
                 # Handle any copy failures
                 $copyFailed = -not $copyResult.PptxSuccess -or -not $copyResult.CsvSuccess
                 if ($copyFailed) {
-                    Write-Host "`n⚠️  Some output files could not be saved (files may be in use):" -ForegroundColor Yellow
+                    Write-Host "`n[WARN]  Some output files could not be saved (files may be in use):" -ForegroundColor Yellow
                     if (-not $copyResult.PptxSuccess) {
                         Write-Host "  Optimized PPTX saved at: $tempPptxPath" -ForegroundColor Cyan
-                        Write-Host "  → Close the target file and copy manually, or re-run the script." -ForegroundColor Gray
+                        Write-Host "  -> Close the target file and copy manually, or re-run the script." -ForegroundColor Gray
                     }
                     if (-not $copyResult.CsvSuccess) {
                         Write-Host "  CSV report saved at: $tempCsvPath" -ForegroundColor Cyan
-                        Write-Host "  → Close the target file and copy manually, or re-run the script." -ForegroundColor Gray
+                        Write-Host "  -> Close the target file and copy manually, or re-run the script." -ForegroundColor Gray
                     }
                     $exitCode = 1
                 } else {
@@ -3555,7 +3555,7 @@ begin {
                     $hasTempPptx = $tempPptxPath -and (Test-Path -LiteralPath $tempPptxPath)
                     $hasTempCsv = $tempCsvPath -and (Test-Path -LiteralPath $tempCsvPath)
                     if ($hasTempPptx -or $hasTempCsv) {
-                        Write-Host "`n💾 Temporary files preserved:" -ForegroundColor Yellow
+                        Write-Host "`n[SAVE] Temporary files preserved:" -ForegroundColor Yellow
                         if ($hasTempPptx) {
                             Write-Host "  PPTX: $tempPptxPath" -ForegroundColor Cyan
                         }
@@ -3567,7 +3567,7 @@ begin {
             }
             
         } catch {
-            Write-Host "`n❌ Unexpected error: $_" -ForegroundColor Red
+            Write-Host "`n[ERROR] Unexpected error: $_" -ForegroundColor Red
             if (Test-VerboseMode) {
                 Write-Host "`nStack trace:" -ForegroundColor DarkGray
                 Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
@@ -3612,7 +3612,7 @@ process {
         Write-Host "`n" + ("=" * 60) -ForegroundColor DarkGray
     }
     
-    Write-Host "`n📂 Processing file $($script:FileCount): $(Split-Path $InputPath -Leaf)" -ForegroundColor Cyan
+    Write-Host "`n[FILE] Processing file $($script:FileCount): $(Split-Path $InputPath -Leaf)" -ForegroundColor Cyan
     
     $result = Invoke-PptOptimization -CurrentInputPath $InputPath
     $script:BatchResults.Add($result)
@@ -3622,7 +3622,7 @@ end {
     # Output results
     if ($script:BatchMode -and $script:BatchResults.Count -gt 1) {
         Write-Host "`n" + ("=" * 60) -ForegroundColor DarkGray
-        Write-Host "📊 BATCH SUMMARY" -ForegroundColor Cyan
+        Write-Host "[STATS] BATCH SUMMARY" -ForegroundColor Cyan
         Write-Host ("=" * 60) -ForegroundColor DarkGray
         
         $totalOriginal = ($script:BatchResults | Measure-Object -Property OriginalSizeBytes -Sum).Sum

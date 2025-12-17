@@ -1,6 +1,6 @@
 # Optimize-PptImages
 
-A cross-platform PowerShell script that intelligently optimizes PowerPoint presentations by resizing oversized images, applying physical crops, converting inefficient formats, and reducing file sizes—often by 50-95% without visible quality loss.
+A cross-platform PowerShell script that intelligently optimizes PowerPoint presentations by resizing oversized images, applying physical crops, converting inefficient formats, and reducing file sizes--often by 50-95% without visible quality loss.
 
 ## Table of Contents
 
@@ -87,32 +87,32 @@ Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -OptimizeSlides -CropSlides
 
 ### Core Optimization
 
-- **Image resizing** — Reduces oversized images to match display size with configurable headroom (default 2×)
-- **Physical cropping** — Materializes PowerPoint's soft crops into actual image files, removing hidden data
-- **Format conversion** — Converts PNG→JPEG when transparency isn't needed; converts BMP, TIFF, GIF→JPEG/PNG
-- **Unreferenced media cleanup** — Removes orphaned files from `ppt/media/`
+- **Image resizing** -- Reduces oversized images to match display size with configurable headroom (default 2x)
+- **Physical cropping** -- Materializes PowerPoint's soft crops into actual image files, removing hidden data
+- **Format conversion** -- Converts PNG->JPEG when transparency isn't needed; converts BMP, TIFF, GIF->JPEG/PNG
+- **Unreferenced media cleanup** -- Removes orphaned files from `ppt/media/`
 
 ### Intelligent Processing
 
-- **Transparency analysis** — Detects actual transparent pixels (not just alpha channel presence)
-- **JPEG quality preservation** — Avoids recompression when source quality is already optimal
-- **Morph transition protection** — Preserves linked images across Morph slide pairs
-- **Shared image awareness** — Uses maximum display size across all usages
-- **Minimum savings threshold** — Skip optimizations below configurable savings percentage
+- **Transparency analysis** -- Detects actual transparent pixels (not just alpha channel presence)
+- **JPEG quality preservation** -- Avoids recompression when source quality is already optimal
+- **Morph transition protection** -- Preserves linked images across Morph slide pairs
+- **Shared image awareness** -- Uses maximum display size across all usages
+- **Minimum savings threshold** -- Skip optimizations below configurable savings percentage
 
 ### Batch & Automation
 
-- **Pipeline input** — Process multiple files via `Get-ChildItem | .\Optimize-PptImages.ps1`
-- **Batch summary** — Aggregated statistics when processing multiple files
-- **PassThru output** — Return result objects for programmatic use
-- **Selective processing** — Include or exclude specific slides
-- **WhatIf/Confirm support** — Preview changes before applying
+- **Pipeline input** -- Process multiple files via `Get-ChildItem | .\Optimize-PptImages.ps1`
+- **Batch summary** -- Aggregated statistics when processing multiple files
+- **PassThru output** -- Return result objects for programmatic use
+- **Selective processing** -- Include or exclude specific slides
+- **WhatIf/Confirm support** -- Preview changes before applying
 
 ### Output & Reporting
 
-- **Detailed console output** — Emoji-based status indicators with progress
-- **CSV report** — Per-image statistics for auditing and analysis
-- **Verbose mode** — Detailed logging with `-Verbose`
+- **Detailed console output** -- Tag-based status indicators with progress
+- **CSV report** -- Per-image statistics for auditing and analysis
+- **Verbose mode** -- Detailed logging with `-Verbose`
 
 ---
 
@@ -127,9 +127,9 @@ Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -OptimizeSlides -CropSlides
 
 | Platform | PowerShell Version | Status |
 |----------|-------------------|--------|
-| Windows | 5.1+, Core 7+ | ✅ Supported |
-| macOS | Core 7+ | ✅ Supported |
-| Linux | Core 7+ | ✅ Supported |
+| Windows | 5.1+, Core 7+ | Supported |
+| macOS | Core 7+ | Supported |
+| Linux | Core 7+ | Supported |
 
 ---
 
@@ -230,7 +230,7 @@ Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -OptimizeSlides -WhatIf
 **Batch Output Example:**
 ```
 ============================================================
-📊 BATCH SUMMARY
+[STATS] BATCH SUMMARY
 ============================================================
 Files processed: 5
   Successful: 5
@@ -253,7 +253,7 @@ Total savings:
 | `CropSlides` | Switch | `$false` | Apply physical crops to images in slides |
 | `CropMastersAndLayouts` | Switch | `$false` | Apply physical crops to images in master slides and layouts |
 | `All` | Switch | `$false` | Enable all optimization and cropping operations |
-| `HeadroomFactor` | Decimal | `2.0` | Target resolution multiplier (0.5-4.0). 2.0 = 2× display size |
+| `HeadroomFactor` | Decimal | `2.0` | Target resolution multiplier (0.5-4.0). 2.0 = 2x display size |
 | `JpegQuality` | Int | `95` | JPEG quality for compression (1-100) |
 | `TransparencyThresholdPercent` | Decimal | `0.1` | Minimum transparency % to keep PNG format (0.0-100.0) |
 | `MinSavingsPercent` | Decimal | `0.0` | Minimum savings % required to apply optimization (0.0-50.0) |
@@ -262,7 +262,7 @@ Total savings:
 | `CsvReportPath` | String | `<o>.opt-report.csv` | Path for CSV report file |
 | `PassThru` | Switch | `$false` | Return result object(s) to pipeline |
 
-**Note:** When using `-IncludeSlides` or `-ExcludeSlides`, all slides are still analyzed for correct shared image sizing and Morph detection—only the modification is filtered.
+**Note:** When using `-IncludeSlides` or `-ExcludeSlides`, all slides are still analyzed for correct shared image sizing and Morph detection--only the modification is filtered.
 
 ---
 
@@ -272,10 +272,10 @@ Total savings:
 
 PowerPoint stores the **full original image** regardless of how you resize it on the slide:
 
-- **Physical Size:** Actual pixel dimensions (e.g., 3840×2160px photo at 2 MB)
-- **Display Size:** How large it appears on slide (e.g., scaled to 400×225px)
+- **Physical Size:** Actual pixel dimensions (e.g., 3840x2160px photo at 2 MB)
+- **Display Size:** How large it appears on slide (e.g., scaled to 400x225px)
 
-If you display a 3840×2160px image at 400×225px, you're storing ~95% unnecessary data.
+If you display a 3840x2160px image at 400x225px, you're storing ~95% unnecessary data.
 
 **How PowerPoint Measures Size:**
 
@@ -296,10 +296,10 @@ The script intelligently converts formats when beneficial:
 
 | Source Format | Conversion | Condition |
 |---------------|------------|-----------|
-| PNG | → JPEG | Transparency < threshold (default 0.1%) |
-| BMP | → JPEG/PNG | Based on transparency analysis |
-| TIFF | → JPEG/PNG | Based on transparency analysis |
-| GIF (static) | → JPEG/PNG | Based on transparency analysis |
+| PNG | -> JPEG | Transparency < threshold (default 0.1%) |
+| BMP | -> JPEG/PNG | Based on transparency analysis |
+| TIFF | -> JPEG/PNG | Based on transparency analysis |
+| GIF (static) | -> JPEG/PNG | Based on transparency analysis |
 | GIF (animated) | *Skipped* | Would break animation |
 
 **Transparency Analysis:** The script counts actual transparent pixels, not just alpha channel presence. A PNG with an alpha channel but no actual transparency gets converted to JPEG.
@@ -318,13 +318,13 @@ PowerPoint can share a single media file across multiple slides. When you copy-p
 ### Masters and Layouts
 
 PowerPoint's three-tier hierarchy:
-1. **Slide Masters** — Top-level templates
-2. **Slide Layouts** — Layout templates based on masters  
-3. **Slides** — Actual content based on layouts
+1. **Slide Masters** -- Top-level templates
+2. **Slide Layouts** -- Layout templates based on masters  
+3. **Slides** -- Actual content based on layouts
 
 By default, the script **skips master/layout images** to avoid widespread changes. Enable with:
-- `-OptimizeMastersAndLayouts` — Resize and convert formats
-- `-CropMastersAndLayouts` — Apply physical crops
+- `-OptimizeMastersAndLayouts` -- Resize and convert formats
+- `-CropMastersAndLayouts` -- Apply physical crops
 
 ### Morph Transition Protection
 
@@ -340,70 +340,72 @@ The script detects Morph transitions and:
 ### Console Output
 
 ```
-📂 Processing file 1: Test Deck.pptx
-🔎 Analyzing presentation structure...
+[FILE] Processing file 1: Test Deck.pptx
+[SCAN] Analyzing presentation structure...
    File: D:\Temp\PowerPoint\Test Deck.pptx
-📊 Found 28 image usages
-📊 Across 19 unique images
-🔗 Morph detection: 2 transition(s), 2 image pair(s) linked
-📝 Corrected illegal crop values for 'Picture 3' on Slide 20 (r:-12038→0, b:-182512→0)
+[STATS] Found 28 image usages
+[STATS] Across 19 unique images
+[LINK] Morph detection: 2 transition(s), 2 image pair(s) linked
+[NOTE] Corrected illegal crop values for 'Picture 3' on Slide 20 (r:-12038->0, b:-182512->0)
 
-✂️ Processing image crops...
-   ✂️ Cropped 'Picture 6' on Slide 4 (saved 71.8%)
-   🚫 Morph crop conflict for 'Picture 3' across Slide 18 ↔ 17 (skipping crop & optimization)
-   ⏭️ Skipped crop for 'Picture 3' on Slide 26: animated GIF (would break animation)
-📊 Cropping phase complete: 6 cropped, 3 skipped
+[CROP] Processing image crops...
+   [CROP] Cropped 'Picture 6' on Slide 4 (saved 71.8%)
+   [BLOCK] Morph crop conflict for 'Picture 3' across Slide 18 <-> 17 (skipping crop & optimization)
+   [SKIP] Skipped crop for 'Picture 3' on Slide 26: animated GIF (would break animation)
+[STATS] Cropping phase complete: 6 cropped, 3 skipped
 
-⚙️ Optimizing images...
-   ℹ️ Effective transparency 0.0% for 'Picture 2' on Slide 1 — treating as opaque
-   🔁 Converted PNG to JPEG for 'Picture 2' on Slide 1 (saved 97.7%)
-   ✅ Optimized PNG with transparency for 'Picture 3' on Slide 2 (saved 91.7%)
-   ⏭️ Skipped 'Picture 3' on Slide 20: already at target size and quality (Q95)
-📊 Optimization phase complete: 12 optimized, 10 skipped
+[PROC] Optimizing images...
+   [INFO] Effective transparency 0.0% for 'Picture 2' on Slide 1 -- treating as opaque
+   [CONV] Converted PNG to JPEG for 'Picture 2' on Slide 1 (saved 97.7%)
+   [OK] Optimized PNG with transparency for 'Picture 3' on Slide 2 (saved 91.7%)
+   [SKIP] Skipped 'Picture 3' on Slide 20: already at target size and quality (Q95)
+[STATS] Optimization phase complete: 12 optimized, 10 skipped
 
-🧹 Cleaning up unreferenced media...
-🧹 Media files removed: 4
+[CLEAN] Cleaning up unreferenced media...
+[CLEAN] Media files removed: 4
 
-📦 Repacking presentation...
-✅ Repacked: 6557.56 KB
+[PACK] Repacking presentation...
+[OK] Repacked: 6557.56 KB
 
-🏁 Optimization Complete
-📊 Images cropped: 6
-📊 Images optimized: 11
+[DONE] Optimization Complete
+[STATS] Images cropped: 6
+[STATS] Images optimized: 11
 
-📉 File size:
+[SIZE] File size:
   Original: 62.17 MB
   Optimized: 6.40 MB
   Saved: 55.76 MB (89.7%)
 
-💾 Saving output files...
-📁 Output: D:\Temp\PowerPoint\Test Deck.optimized.pptx
-📊 Report: D:\Temp\PowerPoint\Test Deck.optimized.opt-report.csv
+[SAVE] Saving output files...
+[OUT] Output: D:\Temp\PowerPoint\Test Deck.optimized.pptx
+[OUT] Report: D:\Temp\PowerPoint\Test Deck.optimized.opt-report.csv
 ```
 
 ### Status Indicators
 
-| Emoji | Meaning |
-|-------|---------|
-| 📂 | Processing file (batch mode) |
-| 🔎 | Analysis phase |
-| 📊 | Statistics/summary |
-| 🔗 | Morph transition detection |
-| ✂️ | Cropping operation |
-| ⚙️ | Optimization operation |
-| 🔁 | Format conversion (PNG→JPEG, BMP→JPEG, etc.) |
-| 📝 | Corrections (illegal crop values, removed no-op crop) |
-| ⏭️ | Skipped operation |
-| ℹ️ | Info/notes (transparency detection, kept original) |
-| 🚫 | Blocked operation (Morph conflict, safety) |
-| 🧹 | Cleanup operation |
-| 📦 | Repacking presentation |
-| 📄 | Generating CSV report |
-| ✅ | Success |
-| 🏁 | Completion |
-| 📉 | Size comparison |
-| 💾 | File save operation |
-| 📁 | Output file path |
+| Tag | Meaning |
+|-----|---------|
+| `[FILE]` | Processing file (batch mode) |
+| `[SCAN]` | Analysis phase |
+| `[STATS]` | Statistics/counts |
+| `[LINK]` | Morph transition detection |
+| `[CROP]` | Cropping operation |
+| `[PROC]` | Optimization phase |
+| `[CONV]` | Format conversion (PNG->JPEG, BMP->JPEG, etc.) |
+| `[NOTE]` | Corrections (illegal crop values, removed no-op crop) |
+| `[SKIP]` | Skipped operation |
+| `[INFO]` | Info/notes (transparency detection, kept original) |
+| `[BLOCK]` | Blocked operation (Morph conflict, safety) |
+| `[CLEAN]` | Cleanup operation |
+| `[PACK]` | Repacking presentation |
+| `[CSV]` | Generating CSV report |
+| `[OK]` | Success |
+| `[DONE]` | Completion |
+| `[SIZE]` | File size information |
+| `[SAVE]` | File save operation |
+| `[OUT]` | Output file paths |
+| `[WARN]` | Warning |
+| `[ERROR]` | Error |
 
 ### CSV Report
 
@@ -426,7 +428,7 @@ Each run generates a detailed CSV report with these columns:
 | `HasSrcRect` | Whether PowerPoint crop was present |
 | `CropApplied` | Whether physical crop was applied |
 | `CropNormalized` | Whether illegal crop values were corrected |
-| `CropRemovedNoOp` | Whether a no-op crop (≥98% visible) was removed |
+| `CropRemovedNoOp` | Whether a no-op crop (>=98% visible) was removed |
 | `SvgFallback` | Whether this is an SVG fallback image |
 | `OptimizationStatus` | Result status (see below) |
 | `WhyNotOptimized` | Reason if skipped |
@@ -539,10 +541,10 @@ Each run generates a detailed CSV report with these columns:
 
 ### Before Using This Script
 
-1. **Resize images before inserting** — Don't insert 4000×3000px photos for 400×300px display
-2. **Crop in image editor** — Don't rely on PowerPoint's soft crop
-3. **Choose right format** — Photos→JPEG, transparency→PNG, vectors→SVG
-4. **Copy-paste images** — Don't re-insert same image from disk (enables sharing)
+1. **Resize images before inserting** -- Don't insert 4000x3000px photos for 400x300px display
+2. **Crop in image editor** -- Don't rely on PowerPoint's soft crop
+3. **Choose right format** -- Photos->JPEG, transparency->PNG, vectors->SVG
+4. **Copy-paste images** -- Don't re-insert same image from disk (enables sharing)
 
 ### When This Script Helps Most
 
@@ -580,7 +582,7 @@ Each run generates a detailed CSV report with these columns:
 - **Animated GIFs:** Skipped to preserve animation.
 - **Shared Image Sizing:** Uses largest display size across all usages.
 - **Illegal Crop Correction:** Automatically corrects invalid (negative) crop values.
-- **JPEG Quality Detection:** Avoids recompression if source quality ≤ target.
+- **JPEG Quality Detection:** Avoids recompression if source quality <= target.
 
 ### Backup Recommendation
 
@@ -643,7 +645,7 @@ If optimized file is larger:
 ### Resource Usage
 
 - **Peak memory:** ~500MB-1GB depending on image sizes
-- **Temp disk space:** Up to 2× original file size
+- **Temp disk space:** Up to 2x original file size
 - **Cleanup:** Automatic on completion or error
 
 ### Reporting Issues
@@ -664,4 +666,4 @@ Include:
 
 ---
 
-**Remember:** This script rescues bloated presentations and automates best practices—but the best optimization is careful design from the start. Size images appropriately, choose the right formats, crop before inserting, and reuse via copy-paste.
+**Remember:** This script rescues bloated presentations and automates best practices--but the best optimization is careful design from the start. Size images appropriately, choose the right formats, crop before inserting, and reuse via copy-paste.
