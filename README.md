@@ -107,6 +107,7 @@ Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -OptimizeSlides -CropSlides
 - **PassThru output** -- Return result objects for programmatic use
 - **Selective processing** -- Include or exclude specific slides
 - **WhatIf/Confirm support** -- Preview changes before applying
+- **Unused layout cleanup** -- Removes slide layouts not referenced by any slide, plus masters that become completely unreferenced (opt-in via `-CleanUnusedLayouts`)
 
 ### Output & Reporting
 
@@ -208,6 +209,9 @@ magick --version
 
 # Require minimum 10% savings to apply changes
 .\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -OptimizeSlides -MinSavingsPercent 10
+
+# Remove unused layouts and masters
+.\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -OptimizeSlides -CropSlides -CleanUnusedLayouts
 ```
 
 ### Batch Processing
@@ -252,6 +256,7 @@ Total savings:
 | `OptimizeMastersAndLayouts` | Switch | `$false` | Resize and convert images in master slides and layouts |
 | `CropSlides` | Switch | `$false` | Apply physical crops to images in slides |
 | `CropMastersAndLayouts` | Switch | `$false` | Apply physical crops to images in master slides and layouts |
+| `CleanUnusedLayouts` | Switch | `$false` | Remove slide layouts not used by any slide and masters that become unreferenced. Not included in `-All`. |
 | `All` | Switch | `$false` | Enable all optimization and cropping operations |
 | `HeadroomFactor` | Decimal | `2.0` | Target resolution multiplier (0.5-4.0). 2.0 = 2x display size |
 | `JpegQuality` | Int | `95` | JPEG quality for compression (1-100) |
@@ -325,6 +330,8 @@ PowerPoint's three-tier hierarchy:
 By default, the script **skips master/layout images** to avoid widespread changes. Enable with:
 - `-OptimizeMastersAndLayouts` -- Resize and convert formats
 - `-CropMastersAndLayouts` -- Apply physical crops
+
+Corporate templates often accumulate dozens or hundreds of unused layouts from merged or inherited slide masters. The `-CleanUnusedLayouts` switch removes layouts not referenced by any slide, along with any masters that have no remaining layouts. This is opt-in and not included in `-All`, since it reduces the layout gallery available when creating new slides.
 
 ### Morph Transition Protection
 
