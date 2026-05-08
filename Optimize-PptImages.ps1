@@ -343,44 +343,35 @@ begin {
         param(
             [ImageUsage]$usage,
             [string]$tempDir,
-            [string]$newMediaFileName,
-            [string]$relType = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image'
+            [string]$newMediaFileName
         )
-        
+
         $partDir = Split-Path $usage.PartPath -Parent
         $partFile = Split-Path $usage.PartPath -Leaf
         $relsPath = Join-Path $tempDir (($partDir + '/_rels/' + $partFile + '.rels') -replace '/', '\')
-        
+
         if (-not (Test-Path -LiteralPath $relsPath)) {
             throw "Rels file not found: $relsPath"
         }
-        
+
         $relsDoc = Get-XmlDocument $relsPath
-        
-        # Remove old relationship
-        $oldRId = $usage.BlipRId
-        if ($oldRId) {
-            $oldRel = $relsDoc.SelectSingleNode("//x:Relationship[@Id='$oldRId']", $script:NsMgr)
-            if ($oldRel) {
-                $null = $oldRel.ParentNode.RemoveChild($oldRel)
-            }
-        }
-        
-        # Create new relationship
+
+        # Create new relationship (old one is left intact; other blips on the same
+        # part may still reference it. Orphaned rels are cleaned up by Invoke-MediaCleanup.)
         $newRId = Get-UniqueRId -relsDoc $relsDoc
         $rel = $relsDoc.CreateElement('Relationship', $relsDoc.DocumentElement.NamespaceURI)
         [void]$rel.SetAttribute('Id', $newRId)
-        [void]$rel.SetAttribute('Type', $relType)
+        [void]$rel.SetAttribute('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image')
         [void]$rel.SetAttribute('Target', "../media/$newMediaFileName")
         $null = $relsDoc.DocumentElement.AppendChild($rel)
         Save-XmlDocument -doc $relsDoc -path $relsPath
-        
+
         # Update blip element
         [void]$usage.BlipElement.SetAttribute('embed', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', $newRId)
-        
+
         # Update usage tracking
         $usage.BlipRId = $newRId
-        
+
         return $newRId
     }
 
@@ -2954,45 +2945,100 @@ begin {
 
     function Invoke-MediaCleanup {
         param([string]$tempDir)
-        
+
         Write-Host "`n[CLEAN] Cleaning up unreferenced media..." -ForegroundColor Yellow
-        
-        # Collect all referenced media paths
-        $referenced = [System.Collections.Generic.HashSet[string]]::new()
-        
+
         $relsFiles = Get-ChildItem -Path $tempDir -Filter "*.rels" -Recurse
-        Write-Verbose "Scanning $($relsFiles.Count) relationship files for image references..."
-        
+        $mediaDir = Join-Path $tempDir 'ppt\media'
+        Write-Verbose "Scanning $($relsFiles.Count) relationship files..."
+
+        # Phase 1: Remove orphaned rels entries (rId not referenced by any
+        # element in the parent part XML, or target file missing on disk).
+        # This must run before media deletion so that stale rels entries
+        # don't keep unreferenced files alive.
+        $orphanedRelsCount = 0
         foreach ($relsFile in $relsFiles) {
             $relsDoc = Get-XmlDocument $relsFile.FullName
-            
-            # Check both regular images and HD Photo layers
+
             $imageRels = $relsDoc.SelectNodes('//x:Relationship[@Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"]', $script:NsMgr)
             $hdPhotoRels = $relsDoc.SelectNodes('//x:Relationship[@Type="http://schemas.microsoft.com/office/2007/relationships/hdphoto"]', $script:NsMgr)
-            
+
+            $allRels = @($imageRels) + @($hdPhotoRels)
+            if (-not $allRels -or $allRels.Count -eq 0) { continue }
+
+            $relsDir = Split-Path $relsFile.FullName -Parent
+            $partDir = Split-Path $relsDir -Parent
+            $partFileName = $relsFile.Name -replace '\.rels$', ''
+            $partPath = Join-Path $partDir $partFileName
+            $partContent = $null
+            if (Test-Path -LiteralPath $partPath) {
+                $partContent = [System.IO.File]::ReadAllText($partPath)
+            }
+
+            $modified = $false
+            foreach ($rel in $allRels) {
+                if (-not $rel) { continue }
+                $rId = $rel.GetAttribute('Id')
+                $target = $rel.GetAttribute('Target')
+
+                $isOrphaned = $false
+
+                $mediaFile = $target -replace '^\.\./media/', ''
+                $fullPath = Join-Path $mediaDir $mediaFile
+                if (-not (Test-Path -LiteralPath $fullPath)) {
+                    $isOrphaned = $true
+                }
+
+                if (-not $isOrphaned -and $partContent -and $partContent -notmatch [regex]::Escape("`"$rId`"")) {
+                    $isOrphaned = $true
+                }
+
+                if ($isOrphaned) {
+                    $null = $rel.ParentNode.RemoveChild($rel)
+                    $orphanedRelsCount++
+                    $modified = $true
+                    Write-Verbose "  Removed orphaned rels entry: $rId -> $target (in $($relsFile.Name))"
+                }
+            }
+
+            if ($modified) {
+                Save-XmlDocument -doc $relsDoc -path $relsFile.FullName
+            }
+        }
+
+        if ($orphanedRelsCount -gt 0) {
+            Write-Host "[CLEAN] Orphaned relationship entries removed: $orphanedRelsCount" -ForegroundColor Green
+        }
+
+        # Phase 2: Delete media files not referenced by any remaining rels entry.
+        $referenced = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($relsFile in $relsFiles) {
+            $relsDoc = Get-XmlDocument $relsFile.FullName
+
+            $imageRels = $relsDoc.SelectNodes('//x:Relationship[@Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"]', $script:NsMgr)
+            $hdPhotoRels = $relsDoc.SelectNodes('//x:Relationship[@Type="http://schemas.microsoft.com/office/2007/relationships/hdphoto"]', $script:NsMgr)
+
             foreach ($rel in $imageRels) {
                 $target = $rel.GetAttribute('Target')
                 $mediaFile = $target -replace '^\.\./media/', ''
                 $null = $referenced.Add($mediaFile)
             }
-            
+
             foreach ($rel in $hdPhotoRels) {
                 $target = $rel.GetAttribute('Target')
                 $mediaFile = $target -replace '^\.\./media/', ''
                 $null = $referenced.Add($mediaFile)
             }
         }
-        
+
         Write-Verbose "Found $($referenced.Count) referenced media file(s)"
-        
-        # Find and remove unreferenced files
-        $mediaDir = Join-Path $tempDir 'ppt\media'
+
         if (Test-Path -LiteralPath $mediaDir) {
             $allMedia = Get-ChildItem -Path $mediaDir
             Write-Verbose "Checking $($allMedia.Count) media file(s) for references..."
-            
+
             $deletedCount = 0
-            
+
             foreach ($file in $allMedia) {
                 if (-not $referenced.Contains($file.Name)) {
                     Remove-Item $file.FullName -Force
@@ -3000,7 +3046,7 @@ begin {
                     Write-Verbose "  Deleted unreferenced: $($file.Name)"
                 }
             }
-            
+
             Write-Host "[CLEAN] Media files removed: $deletedCount" -ForegroundColor Green
         }
     }
@@ -3284,7 +3330,7 @@ begin {
             Initialize-Namespaces
             
             # Create temp directory
-            $tempDir = Join-Path $env:TEMP "ppt-optimize-$(New-Guid)"
+            $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "ppt-optimize-$(New-Guid)"
             New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
             
             # Normalize to full path (avoid 8.3 filename issues)
