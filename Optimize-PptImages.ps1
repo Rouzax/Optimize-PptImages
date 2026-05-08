@@ -356,7 +356,7 @@ begin {
 
         $partDir = Split-Path $usage.PartPath -Parent
         $partFile = Split-Path $usage.PartPath -Leaf
-        $relsPath = Join-Path $tempDir (($partDir + '/_rels/' + $partFile + '.rels') -replace '/', '\')
+        $relsPath = Join-Path $tempDir (($partDir + '/_rels/' + $partFile + '.rels'))
 
         if (-not (Test-Path -LiteralPath $relsPath)) {
             throw "Rels file not found: $relsPath"
@@ -728,7 +728,7 @@ begin {
         #>
         param([string]$tempDir)
         
-        $presentationXml = Join-Path $tempDir 'ppt\presentation.xml'
+        $presentationXml = Join-Path $tempDir 'ppt/presentation.xml'
         if (-not (Test-Path $presentationXml)) {
             # Return default widescreen dimensions
             return @{ WidthPx = 1280; HeightPx = 720 }
@@ -756,13 +756,13 @@ begin {
     function Get-CanonicalSlideOrder {
         param([string]$tempDir)
         
-        $presentationXml = Join-Path $tempDir 'ppt\presentation.xml'
+        $presentationXml = Join-Path $tempDir 'ppt/presentation.xml'
         if (-not (Test-Path $presentationXml)) {
             throw "presentation.xml not found"
         }
         
         $presDoc = Get-XmlDocument $presentationXml
-        $presRelsPath = Join-Path $tempDir 'ppt\_rels\presentation.xml.rels'
+        $presRelsPath = Join-Path $tempDir 'ppt/_rels/presentation.xml.rels'
         $presRels = Get-XmlDocument $presRelsPath
         
         # Parse slide list in document order
@@ -809,7 +809,7 @@ begin {
         if ($slides.Count -eq 0) {
             Write-Warning "No slides found in sldIdLst, falling back to file enumeration"
             # Fallback: enumerate slide files
-            $slideFiles = Get-ChildItem -Path (Join-Path $tempDir 'ppt\slides') -Filter 'slide*.xml' | 
+            $slideFiles = Get-ChildItem -Path (Join-Path $tempDir 'ppt/slides') -Filter 'slide*.xml' | 
                 Where-Object { $_.Name -match '^slide(\d+)\.xml$' } |
                 Sort-Object { [int]$matches[1] }
             
@@ -891,7 +891,7 @@ begin {
         $layoutTarget = $layoutRel.GetAttribute('Target')
         # Target is typically "../slideLayouts/slideLayout1.xml" - resolve relative to slides folder
         $layoutPath = $layoutTarget -replace '^\.\./slideLayouts/', 'ppt/slideLayouts/'
-        $layoutFullPath = Join-Path $tempDir ($layoutPath -replace '/', '\')
+        $layoutFullPath = Join-Path $tempDir ($layoutPath)
         
         if (-not (Test-Path -LiteralPath $layoutFullPath)) {
             Write-Verbose "    Layout file not found: $layoutFullPath"
@@ -973,7 +973,7 @@ begin {
             # This ensures correct sizing (max display across all usages) and morph detection
             # Filtering is applied during processing phases (cropping, optimization)
             
-            $slidePath = Join-Path $tempDir ($slide.PartPath -replace '/', '\')
+            $slidePath = Join-Path $tempDir ($slide.PartPath)
             
             if (-not (Test-Path -LiteralPath $slidePath)) {
                 Write-Warning "Slide file not found: $slidePath"
@@ -987,8 +987,8 @@ begin {
             }
             
             # Rels path: ppt/slides/slide1.xml -> ppt/slides/_rels/slide1.xml.rels
-            $slidePartDir = Split-Path ($slide.PartPath -replace '/', '\') -Parent
-            $slideFileName = Split-Path ($slide.PartPath -replace '/', '\') -Leaf
+            $slidePartDir = Split-Path ($slide.PartPath) -Parent
+            $slideFileName = Split-Path ($slide.PartPath) -Leaf
             $relsPath = Join-Path $tempDir (Join-Path $slidePartDir "_rels\$slideFileName.rels")
             $rels = if (Test-Path -LiteralPath $relsPath) { 
                 Get-XmlDocument $relsPath 
@@ -1056,8 +1056,8 @@ begin {
         
         # Process masters and layouts
         $masterLayoutDirs = @(
-            'ppt\slideMasters',
-            'ppt\slideLayouts'
+            'ppt/slideMasters',
+            'ppt/slideLayouts'
         )
         
         foreach ($dir in $masterLayoutDirs) {
@@ -1068,7 +1068,7 @@ begin {
             if ($files.Count -eq 0) { continue }
             
             foreach ($file in $files) {
-                $partPath = ($file.FullName -replace [regex]::Escape($tempDir + '\'), '').Replace('\', '/')
+                $partPath = ($file.FullName -replace [regex]::Escape($tempDir + [System.IO.Path]::DirectorySeparatorChar), '').Replace('\', '/')
                 $contextType = if ($partPath -match 'slideMasters') { [ContextType]::Master } else { [ContextType]::Layout }
                 
                 $doc = Get-XmlDocument $file.FullName
@@ -1076,7 +1076,7 @@ begin {
                 
                 $partDir = Split-Path $partPath -Parent
                 $partFile = Split-Path $partPath -Leaf
-                $relsPath = Join-Path $tempDir (($partDir + '/_rels/' + $partFile + '.rels') -replace '/', '\')
+                $relsPath = Join-Path $tempDir (($partDir + '/_rels/' + $partFile + '.rels'))
                 $rels = if (Test-Path -LiteralPath $relsPath) { Get-XmlDocument $relsPath } else { $null }
                 
                 $pics = $doc.GetElementsByTagName('pic', 'http://schemas.openxmlformats.org/presentationml/2006/main')
@@ -1174,7 +1174,7 @@ begin {
         
         $target = $rel.GetAttribute('Target')
         $mediaPath = $target -replace '^\.\./media/', 'ppt/media/'
-        $fullPath = Join-Path $tempDir ($mediaPath -replace '/', '\')
+        $fullPath = Join-Path $tempDir ($mediaPath)
         
         if (-not (Test-Path -LiteralPath $fullPath)) { 
             return $null 
@@ -1326,7 +1326,7 @@ begin {
         
         $target = $rel.GetAttribute('Target')
         $mediaFile = $target -replace '^\.\./media/', ''
-        $mediaPath = Join-Path $tempDir "ppt\media\$mediaFile"
+        $mediaPath = Join-Path $tempDir "ppt/media/$mediaFile"
         
         if (-not (Test-Path -LiteralPath $mediaPath)) {
             Write-Verbose "  Media file not found: $mediaFile"
@@ -3146,7 +3146,7 @@ begin {
         Write-Host "`n[CLEAN] Cleaning up unreferenced media..." -ForegroundColor Yellow
 
         $relsFiles = Get-ChildItem -Path $tempDir -Filter "*.rels" -Recurse
-        $mediaDir = Join-Path $tempDir 'ppt\media'
+        $mediaDir = Join-Path $tempDir 'ppt/media'
         Write-Verbose "Scanning $($relsFiles.Count) relationship files..."
 
         # Phase 1: Remove orphaned rels entries (rId not referenced by any
@@ -3624,7 +3624,7 @@ begin {
                         
                         Invoke-CropNormalization -usage $usage
                         if ($usage.CropNormalized -and $usage.SlideDocument) {
-                            $slidePath = Join-Path $tempDir ($usage.PartPath -replace '/', '\')
+                            $slidePath = Join-Path $tempDir ($usage.PartPath)
                             $docsToSave[$slidePath] = $usage.SlideDocument
                         }
                     }
@@ -3643,7 +3643,7 @@ begin {
                     $docsToSave = @{}
                     foreach ($usage in $usages | Where-Object { $_.CropApplied -or $_.CropRemovedNoOp }) {
                         if ($usage.SlideDocument) {
-                            $slidePath = Join-Path $tempDir ($usage.PartPath -replace '/', '\')
+                            $slidePath = Join-Path $tempDir ($usage.PartPath)
                             $docsToSave[$slidePath] = $usage.SlideDocument
                         }
                     }
@@ -3659,7 +3659,7 @@ begin {
                 $docsToSave = @{}
                 foreach ($usage in $usages | Where-Object { $_.OptimizationStatus -match '^Converted' }) {
                     if ($usage.SlideDocument) {
-                        $slidePath = Join-Path $tempDir ($usage.PartPath -replace '/', '\')
+                        $slidePath = Join-Path $tempDir ($usage.PartPath)
                         $docsToSave[$slidePath] = $usage.SlideDocument
                         $relativePath = $usage.PartPath
                         Write-Verbose "Marking document for save (format conversion): $relativePath"
@@ -3672,7 +3672,7 @@ begin {
                     Write-Host "[SAVE] Saving $($docsToSave.Count) updated document(s)..." -ForegroundColor Yellow
                     foreach ($path in $docsToSave.Keys) {
                         try {
-                            $relativePath = $path -replace [regex]::Escape($tempDir + '\'), ''
+                            $relativePath = $path -replace [regex]::Escape($tempDir + [System.IO.Path]::DirectorySeparatorChar), ''
                             Write-Verbose "Saving updated document: $relativePath"
                             Save-XmlDocument -doc $docsToSave[$path] -path $path
                         } catch {
@@ -3701,9 +3701,9 @@ begin {
                 # Validate critical files before repacking
                 $criticalFiles = @(
                     '[Content_Types].xml',
-                    '_rels\.rels',
-                    'ppt\presentation.xml',
-                    'ppt\_rels\presentation.xml.rels'
+                    '_rels/.rels',
+                    'ppt/presentation.xml',
+                    'ppt/_rels/presentation.xml.rels'
                 )
                 
                 Write-Verbose "Validating $($criticalFiles.Count) critical files before repack..."
