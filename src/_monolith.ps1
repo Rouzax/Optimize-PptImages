@@ -3162,7 +3162,7 @@
         Write-Verbose "Found $($referenced.Count) referenced media file(s)"
 
         if (Test-Path -LiteralPath $mediaDir) {
-            $allMedia = Get-ChildItem -Path $mediaDir
+            $allMedia = @(Get-ChildItem -Path $mediaDir)
             Write-Verbose "Checking $($allMedia.Count) media file(s) for references..."
 
             $deletedCount = 0
