@@ -127,6 +127,9 @@ param(
     [switch]$CleanUnusedLayouts,
 
     [Parameter(Mandatory=$false)]
+    [switch]$ValidateOutput,
+
+    [Parameter(Mandatory=$false)]
     [switch]$All,
 
     [Parameter(Mandatory=$false)]
@@ -182,6 +185,7 @@ begin {
         $script:CropMastersAndLayouts = $CropMastersAndLayouts.IsPresent
     }
     $script:CleanUnusedLayouts = $CleanUnusedLayouts.IsPresent
+    $script:ValidateOutput = $ValidateOutput.IsPresent
 
     #region Enums
 
@@ -3140,6 +3144,119 @@ begin {
 
     #region Cleanup and Packaging
 
+    # Heuristic: does a shape name look like think-cell content?
+    # think-cell labels its shapes "think-cell data - do not delete" and "think-cell Slide".
+    function Test-ThinkCellName {
+        param([string]$Name)
+        if (-not $Name) { return $false }
+        return $Name -match 'think[\s-]?cell'
+    }
+
+    # Resolve a relationship Target (relative to the part that owns the .rels file)
+    # to a package-relative part path using forward slashes, e.g. 'ppt/tags/tag1.xml'.
+    # Returns $null for external targets or anything outside the package.
+    function Resolve-RelationshipTarget {
+        param(
+            [string]$tempDir,
+            [System.IO.FileInfo]$relsFile,
+            [string]$target
+        )
+        if (-not $target) { return $null }
+        # Owning part directory is the parent of the _rels folder.
+        $owningPartDir = Split-Path (Split-Path $relsFile.FullName -Parent) -Parent
+        if ($target.StartsWith('/')) {
+            # Absolute package path (rare): resolve against package root.
+            $combined = Join-Path $tempDir ($target.TrimStart('/'))
+        } else {
+            $combined = Join-Path $owningPartDir $target
+        }
+        $full = [System.IO.Path]::GetFullPath($combined)
+        $root = [System.IO.Path]::GetFullPath($tempDir)
+        if (-not $full.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $null
+        }
+        $rel = $full.Substring($root.Length).TrimStart('\', '/')
+        return ($rel -replace '\\', '/')
+    }
+
+    # Remove non-media parts that nothing references anymore. Generalizes the media
+    # cleanup to satellite parts (ppt/tags, ppt/embeddings) that are left orphaned when
+    # -CleanUnusedLayouts deletes the layouts/masters that referenced them (e.g. think-cell
+    # marker tags and CSmartGrid OLE objects). Also prunes their [Content_Types].xml overrides.
+    # Runs unconditionally; it only removes parts no remaining relationship points to.
+    function Invoke-OrphanedPartCleanup {
+        param([string]$tempDir)
+
+        Write-Host "`n[CLEAN] Removing orphaned parts (tags/embeddings)..." -ForegroundColor Yellow
+
+        $candidateDirs = @('ppt/tags', 'ppt/embeddings')
+        $existingDirs = @($candidateDirs | Where-Object { Test-Path -LiteralPath (Join-Path $tempDir $_) })
+        if ($existingDirs.Count -eq 0) {
+            Write-Host "[CLEAN] No tags/embeddings parts present" -ForegroundColor Green
+            return
+        }
+
+        # Build the set of every part path referenced by any relationship in the package.
+        $referenced = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $relsFiles = Get-ChildItem -Path $tempDir -Filter '*.rels' -Recurse
+        foreach ($relsFile in $relsFiles) {
+            $relsDoc = Get-XmlDocument $relsFile.FullName
+            $rels = $relsDoc.SelectNodes('//x:Relationship', $script:NsMgr)
+            foreach ($rel in $rels) {
+                if ($rel.GetAttribute('TargetMode') -eq 'External') { continue }
+                $resolved = Resolve-RelationshipTarget -tempDir $tempDir -relsFile $relsFile -target $rel.GetAttribute('Target')
+                if ($resolved) { $null = $referenced.Add($resolved) }
+            }
+        }
+
+        $contentTypesPath = Join-Path $tempDir '[Content_Types].xml'
+        $contentTypesDoc = Get-XmlDocument $contentTypesPath
+        $contentTypesModified = $false
+
+        $removedByDir = @{}
+        foreach ($dir in $existingDirs) {
+            $removedByDir[$dir] = 0
+            $partDirPath = Join-Path $tempDir $dir
+            foreach ($file in (Get-ChildItem -Path $partDirPath -File)) {
+                $partRel = "$dir/$($file.Name)"
+                if ($referenced.Contains($partRel)) { continue }
+
+                Remove-Item -LiteralPath $file.FullName -Force
+                $removedByDir[$dir]++
+
+                # Remove the part's own .rels if present.
+                $partRelsPath = Join-Path $partDirPath "_rels/$($file.Name).rels"
+                if (Test-Path -LiteralPath $partRelsPath) {
+                    Remove-Item -LiteralPath $partRelsPath -Force
+                }
+
+                # Prune the matching [Content_Types].xml Override (leave shared Defaults).
+                $override = $contentTypesDoc.SelectSingleNode(
+                    "//ct:Override[@PartName='/$partRel']",
+                    $script:NsMgr
+                )
+                if ($override) {
+                    $null = $override.ParentNode.RemoveChild($override)
+                    $contentTypesModified = $true
+                }
+
+                Write-Verbose "  Removed orphaned part: $partRel"
+            }
+        }
+
+        if ($contentTypesModified) {
+            Save-XmlDocument -doc $contentTypesDoc -path $contentTypesPath
+        }
+
+        $total = ($removedByDir.Values | Measure-Object -Sum).Sum
+        if ($total -gt 0) {
+            $detail = ($existingDirs | ForEach-Object { "$($_ -replace '^ppt/', ''): $($removedByDir[$_])" }) -join ', '
+            Write-Host "[CLEAN] Orphaned parts removed: $total ($detail)" -ForegroundColor Green
+        } else {
+            Write-Host "[CLEAN] No orphaned parts found" -ForegroundColor Green
+        }
+    }
+
     function Invoke-MediaCleanup {
         param([string]$tempDir)
 
@@ -3339,13 +3456,213 @@ begin {
         }
     }
 
+    # Load the DocumentFormat.OpenXml SDK if available. Returns $true when the
+    # PresentationDocument type is usable, $false otherwise. The SDK is optional
+    # tooling (only ImageMagick is a hard dependency), so absence is not an error.
+    function Import-OpenXmlSdk {
+        if ('DocumentFormat.OpenXml.Packaging.PresentationDocument' -as [type]) {
+            return $true
+        }
+        try {
+            $fwPkg = Get-Package -Name DocumentFormat.OpenXml.Framework -ErrorAction Stop
+            $mainPkg = Get-Package -Name DocumentFormat.OpenXml -ErrorAction Stop
+            $fwDll = Get-ChildItem (Split-Path $fwPkg.Source -Parent) -Recurse -Filter '*.dll' |
+                Where-Object { $_.FullName -match 'netstandard' } | Select-Object -First 1
+            $mainDll = Get-ChildItem (Split-Path $mainPkg.Source -Parent) -Recurse -Filter '*.dll' |
+                Where-Object { $_.FullName -match 'netstandard' } | Select-Object -First 1
+            if (-not $fwDll -or -not $mainDll) { return $false }
+            Add-Type -Path $fwDll.FullName
+            Add-Type -Path $mainDll.FullName
+            return [bool]('DocumentFormat.OpenXml.Packaging.PresentationDocument' -as [type])
+        } catch {
+            Write-Verbose "Open XML SDK not available: $_"
+            return $false
+        }
+    }
+
+    # Optional post-repack validation (opt-in via -ValidateOutput). Runs the Open XML
+    # SDK validator against the repacked file and reports any errors. Non-fatal: it
+    # surfaces problems but does not abort the run or discard the output.
+    function Test-OutputValidity {
+        param([string]$pptxPath)
+
+        Write-Host "`n[VALIDATE] Validating output with Open XML SDK..." -ForegroundColor Yellow
+
+        if (-not (Import-OpenXmlSdk)) {
+            Write-Warning "Open XML SDK (DocumentFormat.OpenXml) not found; skipping validation. Install it to enable -ValidateOutput."
+            return
+        }
+
+        $doc = $null
+        try {
+            $doc = [DocumentFormat.OpenXml.Packaging.PresentationDocument]::Open($pptxPath, $false)
+            $validator = [DocumentFormat.OpenXml.Validation.OpenXmlValidator]::new()
+            $errors = @($validator.Validate($doc))
+
+            if ($errors.Count -eq 0) {
+                Write-Host "[OK] Output is valid (0 errors)" -ForegroundColor Green
+            } else {
+                Write-Warning "Output validation reported $($errors.Count) issue(s):"
+                foreach ($e in ($errors | Select-Object -First 10)) {
+                    Write-Warning "  [$($e.ErrorType)] $($e.Description)"
+                }
+                if ($errors.Count -gt 10) {
+                    Write-Warning "  ... and $($errors.Count - 10) more"
+                }
+            }
+        } catch {
+            Write-Warning "Validation could not run: $_"
+        } finally {
+            if ($doc) { $doc.Dispose() }
+        }
+    }
+
     #endregion
 
     #region CSV Reporting
 
+    # Build a reverse index of which slides use each layout and master, keyed by part
+    # file name (e.g. 'slideLayout47.xml'). Slide numbers use the canonical deck order
+    # from $slides (sldIdLst), so they match the report's SlideNumber column.
+    # Returns @{ Layout = @{ name = @(numbers) }; Master = @{ name = @(numbers) } }.
+    function Get-PartSlideUsage {
+        param(
+            [string]$tempDir,
+            [System.Collections.Generic.List[SlideInfo]]$slides
+        )
+
+        $layoutToSlides = @{}
+        $layoutToMaster = @{}
+        $layoutRelType = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout'
+        $masterRelType = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster'
+
+        foreach ($slide in $slides) {
+            $slideFile = Split-Path $slide.PartPath -Leaf
+            $slideRelsPath = Join-Path $tempDir "ppt/slides/_rels/$slideFile.rels"
+            if (-not (Test-Path -LiteralPath $slideRelsPath)) { continue }
+            $relsDoc = Get-XmlDocument $slideRelsPath
+            $layoutRel = $relsDoc.SelectSingleNode("//x:Relationship[@Type='$layoutRelType']", $script:NsMgr)
+            if (-not $layoutRel) { continue }
+            $layoutFile = Split-Path $layoutRel.GetAttribute('Target') -Leaf
+            if (-not $layoutToSlides.ContainsKey($layoutFile)) {
+                $layoutToSlides[$layoutFile] = [System.Collections.Generic.List[int]]::new()
+            }
+            $layoutToSlides[$layoutFile].Add($slide.Number)
+        }
+
+        # Map each layout to its master so master usage can be rolled up.
+        $layoutRelsDir = Join-Path $tempDir 'ppt/slideLayouts/_rels'
+        if (Test-Path -LiteralPath $layoutRelsDir) {
+            foreach ($relsFile in (Get-ChildItem -Path $layoutRelsDir -Filter '*.rels')) {
+                $relsDoc = Get-XmlDocument $relsFile.FullName
+                $masterRel = $relsDoc.SelectSingleNode("//x:Relationship[@Type='$masterRelType']", $script:NsMgr)
+                if (-not $masterRel) { continue }
+                $layoutFile = $relsFile.Name -replace '\.rels$', ''
+                $layoutToMaster[$layoutFile] = Split-Path $masterRel.GetAttribute('Target') -Leaf
+            }
+        }
+
+        $masterToSlides = @{}
+        foreach ($layoutFile in $layoutToSlides.Keys) {
+            if (-not $layoutToMaster.ContainsKey($layoutFile)) { continue }
+            $masterFile = $layoutToMaster[$layoutFile]
+            if (-not $masterToSlides.ContainsKey($masterFile)) {
+                $masterToSlides[$masterFile] = [System.Collections.Generic.List[int]]::new()
+            }
+            $masterToSlides[$masterFile].AddRange($layoutToSlides[$layoutFile])
+        }
+
+        return @{ Layout = $layoutToSlides; Master = $masterToSlides }
+    }
+
+    # Format a sorted, de-duplicated slide-number list, or '(none)' when empty.
+    function Format-SlideList {
+        param([System.Collections.Generic.List[int]]$numbers)
+        if (-not $numbers -or $numbers.Count -eq 0) { return '(none)' }
+        return (($numbers | Sort-Object -Unique) -join ', ')
+    }
+
+    # Console summary of think-cell content so users can find it and judge what is safe
+    # to remove. Covers think-cell images (by shape name) and the tag/embedding parts
+    # (by content). Reports total size, carrying layouts, and the slides that use them.
+    function Write-ThinkCellSummary {
+        param(
+            [string]$tempDir,
+            [System.Collections.Generic.List[ImageUsage]]$usages,
+            [hashtable]$partSlideUsage
+        )
+
+        $tcUsages = @($usages | Where-Object { Test-ThinkCellName $_.ShapeName })
+
+        # Detect think-cell tag/embedding parts by content.
+        $tcParts = [System.Collections.Generic.List[string]]::new()
+        $tagsDir = Join-Path $tempDir 'ppt/tags'
+        if (Test-Path -LiteralPath $tagsDir) {
+            foreach ($f in (Get-ChildItem -Path $tagsDir -Filter '*.xml' -File)) {
+                if ([System.IO.File]::ReadAllText($f.FullName) -match 'THINKCELL|think[\s-]?cell') {
+                    $tcParts.Add("tags/$($f.Name)")
+                }
+            }
+        }
+        $embDir = Join-Path $tempDir 'ppt/embeddings'
+        if (Test-Path -LiteralPath $embDir) {
+            foreach ($f in (Get-ChildItem -Path $embDir -File)) {
+                $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+                $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+                if ($text -match 'CSmartGrid|thinkcell') {
+                    $tcParts.Add("embeddings/$($f.Name)")
+                }
+            }
+        }
+
+        if ($tcUsages.Count -eq 0 -and $tcParts.Count -eq 0) { return }
+
+        # Total size: unique image files used by think-cell shapes + the parts. Use the
+        # scanned BeforeSizeBytes so the footprint is reported even after cleanup deletes
+        # the files.
+        $totalBytes = 0L
+        $countedFiles = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($u in $tcUsages) {
+            if ($u.OriginalFileName -and $countedFiles.Add($u.OriginalFileName)) {
+                $totalBytes += $u.BeforeSizeBytes
+            }
+        }
+        foreach ($p in $tcParts) {
+            $pp = Join-Path $tempDir "ppt/$p"
+            if (Test-Path -LiteralPath $pp) { $totalBytes += (Get-Item -LiteralPath $pp).Length }
+        }
+        $sizeMb = [math]::Round($totalBytes / 1MB, 2)
+
+        Write-Host "`n[THINK-CELL] Detected think-cell content ($sizeMb MB)" -ForegroundColor Cyan
+
+        # Group carrying layouts and resolve which slides use them.
+        $layoutFiles = @($tcUsages |
+            Where-Object { $_.ContextType -eq [ContextType]::Layout -and $_.PartPath } |
+            ForEach-Object { Split-Path $_.PartPath -Leaf } |
+            Sort-Object -Unique)
+        if ($layoutFiles.Count -gt 0) {
+            $allSlides = [System.Collections.Generic.List[int]]::new()
+            foreach ($lf in $layoutFiles) {
+                if ($partSlideUsage.Layout.ContainsKey($lf)) {
+                    $allSlides.AddRange($partSlideUsage.Layout[$lf])
+                }
+            }
+            $layoutNums = ($layoutFiles | ForEach-Object { if ($_ -match '(\d+)\.xml$') { [int]$matches[1] } }) | Sort-Object -Unique
+            Write-Host "             Carried by layouts: $($layoutNums -join ', ')" -ForegroundColor Cyan
+            Write-Host "             Used on slides: $(Format-SlideList $allSlides)" -ForegroundColor Cyan
+            if ($allSlides.Count -eq 0 -and -not $script:CleanUnusedLayouts) {
+                Write-Host "             These layouts are unused; run with -CleanUnusedLayouts to remove them." -ForegroundColor Cyan
+            }
+        }
+        if ($tcParts.Count -gt 0) {
+            Write-Host "             Add-in parts: $($tcParts -join ', ')" -ForegroundColor Cyan
+        }
+    }
+
     function Export-CsvReport {
         param(
-            [System.Collections.Generic.List[ImageUsage]]$usages
+            [System.Collections.Generic.List[ImageUsage]]$usages,
+            [hashtable]$partSlideUsage
         )
         
         Write-Host "`n[CSV] Generating report..." -ForegroundColor Yellow
@@ -3392,12 +3709,27 @@ begin {
         )
         
         $rows = foreach ($usage in $sorted) {
+            # Reverse-link: which slides use this layout/master asset. Slide rows already
+            # carry their own SlideNumber, so leave UsedOnSlides blank there.
+            $usedOnSlides = ''
+            if ($partSlideUsage -and $usage.PartPath) {
+                $partFile = Split-Path $usage.PartPath -Leaf
+                if ($usage.ContextType -eq [ContextType]::Layout) {
+                    $usedOnSlides = Format-SlideList $partSlideUsage.Layout[$partFile]
+                } elseif ($usage.ContextType -eq [ContextType]::Master) {
+                    $usedOnSlides = Format-SlideList $partSlideUsage.Master[$partFile]
+                }
+            }
+
             [PSCustomObject]@{
                 Location = $usage.Location
                 ContextType = $usage.ContextType.ToString()
                 SlideNumber = $usage.SlideNumber
                 SlideModified = if ($usage.CropApplied -or $usage.OptimizationStatus -match '^(Optimized|Converted)') { 'Yes' } else { 'No' }
                 ShapeName = $usage.ShapeName
+                IsThinkCell = if (Test-ThinkCellName $usage.ShapeName) { 'Yes' } else { 'No' }
+                UsedOnSlides = $usedOnSlides
+                MediaPart = if ($usage.OriginalFileName) { "ppt/media/$($usage.OriginalFileName)" } else { '' }
                 SourceWidthPx = $usage.SourceWidthPx
                 SourceHeightPx = $usage.SourceHeightPx
                 DisplayWidthPx = $usage.DisplayWidthPx
@@ -3695,6 +4027,7 @@ begin {
                 }
 
                 # Phase 4: Cleanup
+                Invoke-OrphanedPartCleanup -tempDir $tempDir
                 Invoke-MediaCleanup -tempDir $tempDir
                 Update-ContentTypes -tempDir $tempDir
                 
@@ -3718,9 +4051,19 @@ begin {
                 
                 # Phase 5: Repack (to temp file)
                 $tempPptxPath = Invoke-Repack -tempDir $tempDir
-                
+
+                # Optional: validate the repacked file with the Open XML SDK.
+                if ($script:ValidateOutput) {
+                    Test-OutputValidity -pptxPath $tempPptxPath
+                }
+
+                # Build the layout/master -> slides reverse index once (after cleanup, so it
+                # reflects surviving layouts), then reuse for the report and the summary.
+                $partSlideUsage = Get-PartSlideUsage -tempDir $tempDir -slides $slides
+                Write-ThinkCellSummary -tempDir $tempDir -usages $usages -partSlideUsage $partSlideUsage
+
                 # Generate report (to temp file)
-                $tempCsvPath = Export-CsvReport -usages $usages
+                $tempCsvPath = Export-CsvReport -usages $usages -partSlideUsage $partSlideUsage
                 
                 # Final statistics (calculated from temp file)
                 $originalSize = (Get-Item $script:InputFile).Length

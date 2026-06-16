@@ -107,12 +107,14 @@ Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -OptimizeSlides -CropSlides
 - **PassThru output** -- Return result objects for programmatic use
 - **Selective processing** -- Include or exclude specific slides
 - **WhatIf/Confirm support** -- Preview changes before applying
-- **Unused layout cleanup** -- Removes slide layouts not referenced by any slide, plus masters that become completely unreferenced (opt-in via `-CleanUnusedLayouts`)
+- **Unused layout cleanup** -- Removes slide layouts not referenced by any slide, plus masters that become completely unreferenced (opt-in via `-CleanUnusedLayouts`). Orphaned add-in parts (think-cell marker tags and OLE objects under `ppt/tags`/`ppt/embeddings`) that were referenced only by the removed layouts are automatically removed on every run once nothing references them.
 
 ### Output & Reporting
 
 - **Detailed console output** -- Tag-based status indicators with progress
-- **CSV report** -- Per-image statistics for auditing and analysis
+- **CSV report** -- Per-image statistics for auditing and analysis; includes think-cell discovery so you can see which images are think-cell content and which slides depend on their layouts
+- **think-cell summary** -- When think-cell content is detected, a `[THINK-CELL]` console block shows total think-cell size, which layouts carry it, which slides use those layouts, and orphaned add-in parts
+- **Output validation** -- Optional post-repack validation via `-ValidateOutput`; reports Open XML SDK errors as warnings without aborting the run
 - **Verbose mode** -- Detailed logging with `-Verbose`
 
 ---
@@ -257,6 +259,7 @@ Total savings:
 | `CropSlides` | Switch | `$false` | Apply physical crops to images in slides |
 | `CropMastersAndLayouts` | Switch | `$false` | Apply physical crops to images in master slides and layouts |
 | `CleanUnusedLayouts` | Switch | `$false` | Remove slide layouts not used by any slide and masters that become unreferenced. Not included in `-All`. |
+| `ValidateOutput` | Switch | `$false` | Validate the repacked file with the Open XML SDK and report any errors. Non-fatal. Requires the optional DocumentFormat.OpenXml package. Not included in `-All`. |
 | `All` | Switch | `$false` | Enable all optimization and cropping operations |
 | `HeadroomFactor` | Decimal | `2.0` | Target resolution multiplier (0.5-4.0). 2.0 = 2x display size |
 | `JpegQuality` | Int | `95` | JPEG quality for compression (1-100) |
@@ -425,6 +428,9 @@ Each run generates a detailed CSV report with these columns:
 | `SlideNumber` | Slide number (0 for masters/layouts) |
 | `SlideModified` | Whether the slide XML was modified |
 | `ShapeName` | PowerPoint shape name (e.g., "Picture 3") |
+| `IsThinkCell` | `Yes` if the shape is think-cell content (by shape name), else `No` |
+| `UsedOnSlides` | For Layout/Master rows, the slide numbers that use this layout/master (`(none)` if unused); blank for Slide rows |
+| `MediaPart` | Path of the media file inside the package (e.g., `ppt/media/image16.emf`) |
 | `SourceWidthPx` / `SourceHeightPx` | Original image dimensions |
 | `DisplayWidthPx` / `DisplayHeightPx` | Display dimensions on slide |
 | `TargetWidthPx` / `TargetHeightPx` | Target dimensions after headroom factor |
