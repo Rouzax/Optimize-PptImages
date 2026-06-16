@@ -1,8 +1,8 @@
 #Requires -Version 7.0
 Set-StrictMode -Version Latest
 
-. $PSScriptRoot/src/Classes.ps1
 . $PSScriptRoot/src/Config.ps1
+. $PSScriptRoot/src/Classes.ps1
 . $PSScriptRoot/src/Common.ps1
 . $PSScriptRoot/src/Xml.ps1
 . $PSScriptRoot/src/Relationships.ps1
