@@ -1,0 +1,512 @@
+    #region Crop Normalization
+
+    function Invoke-CropNormalization {
+        param([ImageUsage]$usage)
+        
+        if (-not $usage.HasSrcRect) { return }
+        
+        $l = $usage.SrcRectLeft
+        $t = $usage.SrcRectTop
+        $r = $usage.SrcRectRight
+        $b = $usage.SrcRectBottom
+        
+        $needsNormalization = $false
+        $originalValues = @{}
+        
+        # Detect out-of-bounds
+        if ($l -lt 0 -or $l -gt $script:Config.CROP_THOUSANDTHS_MAX -or
+            $t -lt 0 -or $t -gt $script:Config.CROP_THOUSANDTHS_MAX -or
+            $r -lt 0 -or $r -gt $script:Config.CROP_THOUSANDTHS_MAX -or
+            $b -lt 0 -or $b -gt $script:Config.CROP_THOUSANDTHS_MAX) {
+            $needsNormalization = $true
+            $originalValues = @{ l=$l; t=$t; r=$r; b=$b }
+        }
+        
+        if (-not $needsNormalization) { return }
+        
+        # Clamp to valid range
+        $l = [Math]::Max(0, [Math]::Min($l, $script:Config.CROP_THOUSANDTHS_MAX))
+        $t = [Math]::Max(0, [Math]::Min($t, $script:Config.CROP_THOUSANDTHS_MAX))
+        $r = [Math]::Max(0, [Math]::Min($r, $script:Config.CROP_THOUSANDTHS_MAX))
+        $b = [Math]::Max(0, [Math]::Min($b, $script:Config.CROP_THOUSANDTHS_MAX))
+        
+        # Compensate xfrm for normalized crops
+        if ($usage.XfrmElement) {
+            $ext = $usage.XfrmElement.SelectSingleNode('a:ext', $script:NsMgr)
+            $off = $usage.XfrmElement.SelectSingleNode('a:off', $script:NsMgr)
+            
+            if ($ext -and $off) {
+                $origCx = [long]$ext.GetAttribute('cx')
+                $origCy = [long]$ext.GetAttribute('cy')
+                $origX = [long]$off.GetAttribute('x')
+                $origY = [long]$off.GetAttribute('y')
+                
+                # Calculate visible proportions (accounting for negative = extension)
+                $origWidthProp = (100000.0 - $originalValues.l - $originalValues.r) / 100000.0
+                $origHeightProp = (100000.0 - $originalValues.t - $originalValues.b) / 100000.0
+                $newWidthProp = (100000.0 - $l - $r) / 100000.0
+                $newHeightProp = (100000.0 - $t - $b) / 100000.0
+                
+                # Scale dimensions
+                $newCx = [long]($origCx * ($newWidthProp / $origWidthProp))
+                $newCy = [long]($origCy * ($newHeightProp / $origHeightProp))
+                
+                # Adjust position if negative crops were normalized
+                $newX = $origX
+                $newY = $origY
+                
+                if ($originalValues.l -lt 0 -and $l -eq 0) {
+                    $newX = $origX + [long]($origCx * ([Math]::Abs($originalValues.l) / (100000.0 - $originalValues.l - $originalValues.r)))
+                }
+                if ($originalValues.t -lt 0 -and $t -eq 0) {
+                    $newY = $origY + [long]($origCy * ([Math]::Abs($originalValues.t) / (100000.0 - $originalValues.t - $originalValues.b)))
+                }
+                
+                # Clamp to minimums
+                $newCx = [Math]::Max($script:Config.MIN_EMU_DIMENSION, $newCx)
+                $newCy = [Math]::Max($script:Config.MIN_EMU_DIMENSION, $newCy)
+                $newX = [Math]::Max(0, $newX)
+                $newY = [Math]::Max(0, $newY)
+                
+                $ext.SetAttribute('cx', $newCx.ToString())
+                $ext.SetAttribute('cy', $newCy.ToString())
+                $off.SetAttribute('x', $newX.ToString())
+                $off.SetAttribute('y', $newY.ToString())
+            }
+        }
+        
+        # Update srcRect in XML (sibling of blip within blipFill)
+        $blipFill = $usage.BlipElement.ParentNode
+        if ($blipFill) {
+            $srcRect = $blipFill.SelectSingleNode('a:srcRect', $script:NsMgr)
+            if ($srcRect) {
+                if ($l -eq 0) { $srcRect.RemoveAttribute('l') } else { $srcRect.SetAttribute('l', ([int]$l).ToString()) }
+                if ($t -eq 0) { $srcRect.RemoveAttribute('t') } else { $srcRect.SetAttribute('t', ([int]$t).ToString()) }
+                if ($r -eq 0) { $srcRect.RemoveAttribute('r') } else { $srcRect.SetAttribute('r', ([int]$r).ToString()) }
+                if ($b -eq 0) { $srcRect.RemoveAttribute('b') } else { $srcRect.SetAttribute('b', ([int]$b).ToString()) }
+            }
+        }
+        
+        # Update usage
+        $usage.SrcRectLeft = $l
+        $usage.SrcRectTop = $t
+        $usage.SrcRectRight = $r
+        $usage.SrcRectBottom = $b
+        $usage.CropNormalized = $true
+        
+        # Recompute display size
+        if ($usage.XfrmElement) {
+            $ext = $usage.XfrmElement.SelectSingleNode('a:ext', $script:NsMgr)
+            if ($ext) {
+                $usage.DisplayWidthPx = ConvertFrom-EMU -emu ([long]$ext.GetAttribute('cx'))
+                $usage.DisplayHeightPx = ConvertFrom-EMU -emu ([long]$ext.GetAttribute('cy'))
+            }
+        }
+        
+        # Build change description
+        $changes = @()
+        $details = @()
+        foreach ($key in @('l', 't', 'r', 'b')) {
+            $oldVal = $originalValues[$key]
+            $newVal = Get-Variable -Name $key -ValueOnly
+            if ($oldVal -ne $newVal) {
+                $changes += "${key}:${oldVal}->${newVal}"
+                
+                # Build detailed explanation for verbose
+                $side = switch ($key) {
+                    'l' { 'left' }
+                    't' { 'top' }
+                    'r' { 'right' }
+                    'b' { 'bottom' }
+                }
+                
+                $reason = if ($oldVal -lt 0) {
+                    "extended beyond image boundary (negative value)"
+                } elseif ($oldVal -gt $script:Config.CROP_THOUSANDTHS_MAX) {
+                    "exceeded maximum allowed value ($($script:Config.CROP_THOUSANDTHS_MAX))"
+                } else {
+                    "was out of valid range [0-$($script:Config.CROP_THOUSANDTHS_MAX)]"
+                }
+                
+                $details += "  * $side edge: $oldVal -> $newVal (was $reason)"
+            }
+        }
+        
+        if ($changes.Count -gt 0) {
+            Write-Host "[NOTE] Corrected illegal crop values for '$($usage.ShapeName)' on $($usage.Location) ($($changes -join ', '))" -ForegroundColor Cyan
+            
+            if (Test-VerboseMode) {
+                Write-Verbose "Illegal crop correction details for '$($usage.ShapeName)':"
+                foreach ($detail in $details) {
+                    Write-Verbose $detail
+                }
+                
+                # Show xfrm adjustments if made
+                if ($usage.XfrmElement) {
+                    $ext = $usage.XfrmElement.SelectSingleNode('a:ext', $script:NsMgr)
+                    $off = $usage.XfrmElement.SelectSingleNode('a:off', $script:NsMgr)
+                    if ($ext -and $off) {
+                        Write-Verbose "  Adjusted shape transform (xfrm) to maintain visual appearance:"
+                        Write-Verbose "    * Position: x=$($off.GetAttribute('x')) EMU, y=$($off.GetAttribute('y')) EMU"
+                        Write-Verbose "    * Size: cx=$($ext.GetAttribute('cx')) EMU ($($usage.DisplayWidthPx)px), cy=$($ext.GetAttribute('cy')) EMU ($($usage.DisplayHeightPx)px)"
+                    }
+                }
+                
+                Write-Verbose "  Crop values are in thousandths (0-100000 range, where 100000 = 100%)"
+                Write-Verbose "  Negative values indicate the image was extended beyond its boundaries"
+            }
+        }
+    }
+
+    #endregion
+
+    #region Cropping
+
+    function Invoke-ImageCropping {
+        [CmdletBinding(SupportsShouldProcess)]
+        param(
+            [System.Collections.Generic.List[ImageUsage]]$usages,
+            [string]$tempDir,
+            [hashtable]$morphPairs
+        )
+        
+        Write-Host "`n[CROP] Processing image crops..." -ForegroundColor Yellow
+        
+        $croppedCount = 0
+        $skippedCount = 0
+        
+        # Determine if slide filters are active (used for scoping)
+        $slideFiltersActive = ($IncludeSlides -and $IncludeSlides.Count -gt 0) -or ($ExcludeSlides -and $ExcludeSlides.Count -gt 0)
+        
+        # Get items with crops that are in scope for progress counter
+        # (excludes items silently skipped due to slide filters, includes SVG fallbacks since they get skip messages)
+        $itemsWithCrops = @($usages | Where-Object { 
+            $_.HasSrcRect -and
+            # Check slide filter
+            ($_.ContextType -ne [ContextType]::Slide -or (Test-SlideIncluded -SlideNumber $_.SlideNumber)) -and
+            # When slide filters active, exclude masters/layouts
+            (-not $slideFiltersActive -or $_.ContextType -eq [ContextType]::Slide)
+        })
+        $totalItems = $itemsWithCrops.Count
+        $currentItem = 0
+        
+        foreach ($usage in $usages) {
+            if (-not $usage.HasSrcRect) { continue }
+            
+            # Silent skip checks FIRST (before progress update)
+            
+            # Check slide filter (silently skip usages not in included slides)
+            if ($usage.ContextType -eq [ContextType]::Slide -and -not (Test-SlideIncluded -SlideNumber $usage.SlideNumber)) {
+                continue
+            }
+            
+            # When slide filters are active, skip masters/layouts entirely
+            # (they affect all slides, not just the filtered ones)
+            if ($slideFiltersActive -and ($usage.ContextType -eq [ContextType]::Master -or $usage.ContextType -eq [ContextType]::Layout)) {
+                continue
+            }
+            
+            # Now update progress (item is in scope)
+            $currentItem++
+            Write-Progress -Activity "Processing crops" -Status "$currentItem of $totalItems" `
+                -PercentComplete (($currentItem / [Math]::Max(1, $totalItems)) * 100) -Id 2
+            
+            # SVG fallback check
+            if ($usage.IsSvgFallbackUsage) {
+                Write-Host "   [SKIP] Skipped crop for '$($usage.ShapeName)' on $($usage.Location): SVG fallback (PowerPoint regenerates)" -ForegroundColor Gray
+                $usage.OptimizationStatus = 'Skipped_SvgFallback'
+                $usage.WhyNotOptimized = 'PNG is auto-generated SVG fallback; PowerPoint regenerates'
+                $usage.ManualActionRequired = $false
+                $skippedCount++
+                continue
+            }
+            
+            # Animated GIF check - cropping would break animation
+            $ext = [System.IO.Path]::GetExtension($usage.ImagePhysicalPath).ToLower()
+            if ($ext -eq '.gif' -and (Test-IsAnimatedGif -ImagePath $usage.ImagePhysicalPath)) {
+                Write-Host "   [SKIP] Skipped crop for '$($usage.ShapeName)' on $($usage.Location): animated GIF (would break animation)" -ForegroundColor Gray
+                $usage.OptimizationStatus = 'Skipped_AnimatedGif'
+                $usage.WhyNotOptimized = 'Animated GIF - would break animation'
+                $usage.ManualActionRequired = $false
+                $skippedCount++
+                continue
+            }
+            
+            # Check if cropping is enabled for this context
+            if ($usage.ContextType -eq [ContextType]::Slide) {
+                if (-not $script:CropSlides) {
+                    Write-Host "   [SKIP] Skipped crop for '$($usage.ShapeName)' on $($usage.Location): enable -CropSlides" -ForegroundColor Gray
+                    $usage.OptimizationStatus = 'Skipped_CropNotMaterialized'
+                    $usage.WhyNotOptimized = 'Slide cropping disabled; enable -CropSlides'
+                    $usage.ManualActionRequired = $true
+                    $usage.ManualActionHint = 'Run with -CropSlides'
+                    $skippedCount++
+                    continue
+                }
+            } elseif ($usage.ContextType -eq [ContextType]::Master -or $usage.ContextType -eq [ContextType]::Layout) {
+                if (-not $script:CropMastersAndLayouts) {
+                    Write-Host "   [SKIP] Skipped crop for '$($usage.ShapeName)' on $($usage.Location): enable -CropMastersAndLayouts" -ForegroundColor Gray
+                    $usage.OptimizationStatus = 'Skipped_CropNotMaterialized'
+                    $usage.WhyNotOptimized = 'Master/Layout cropping disabled; enable -CropMastersAndLayouts'
+                    $usage.ManualActionRequired = $true
+                    $usage.ManualActionHint = 'Run with -CropMastersAndLayouts'
+                    $skippedCount++
+                    continue
+                }
+            }
+            
+            # Check for no-op crop
+            if (Test-IsNoOpCrop -left $usage.SrcRectLeft -top $usage.SrcRectTop -right $usage.SrcRectRight -bottom $usage.SrcRectBottom) {
+                $blipFill = $usage.BlipElement.ParentNode
+                if ($blipFill) {
+                    $srcRect = $blipFill.SelectSingleNode('a:srcRect', $script:NsMgr)
+                    if ($srcRect) {
+                        $null = $srcRect.ParentNode.RemoveChild($srcRect)
+                    }
+                }
+                $usage.HasSrcRect = $false
+                $usage.CropRemovedNoOp = $true
+                Write-Host "   [NOTE] Removed no-op crop for '$($usage.ShapeName)' on $($usage.Location) (full image)" -ForegroundColor Cyan
+                continue
+            }
+            
+            # Check Morph pairs
+            if ($usage.MorphPair) {
+                $pair = $usage.MorphPair
+                $usageHasMeaningful = -not (Test-IsNoOpCrop -left $usage.SrcRectLeft -top $usage.SrcRectTop -right $usage.SrcRectRight -bottom $usage.SrcRectBottom)
+                $pairHasMeaningful = $pair.HasSrcRect -and -not (Test-IsNoOpCrop -left $pair.SrcRectLeft -top $pair.SrcRectTop -right $pair.SrcRectRight -bottom $pair.SrcRectBottom)
+                
+                if ($usageHasMeaningful -or $pairHasMeaningful) {
+                    Write-Host "   [BLOCK] Morph crop conflict for '$($usage.ShapeName)' across Slide $($pair.SlideNumber) <-> $($usage.SlideNumber) (skipping crop & optimization)" -ForegroundColor Red
+                    $usage.OptimizationStatus = 'Skipped_MorphCropConflict'
+                    $pair.OptimizationStatus = 'Skipped_MorphCropConflict'
+                    $usage.WhyNotOptimized = 'Morph transition with crop conflict'
+                    $pair.WhyNotOptimized = 'Morph transition with crop conflict'
+                    $usage.ManualActionRequired = $true
+                    $pair.ManualActionRequired = $true
+                    $usage.ManualActionHint = 'Manually align crops or remove Morph'
+                    $pair.ManualActionHint = 'Manually align crops or remove Morph'
+                    $skippedCount += 2
+                    continue
+                }
+            }
+            
+            # Validate crop geometry
+            if (-not (Test-CropValidity -usage $usage)) {
+                Write-Host "[BLOCK] Skipped crop for '$($usage.ShapeName)' on $($usage.Location): invalid crop geometry" -ForegroundColor Red
+                $usage.OptimizationStatus = 'Skipped_CropInvalidOrUnsafe'
+                $usage.WhyNotOptimized = 'Invalid crop geometry'
+                $usage.ManualActionRequired = $true
+                $usage.ManualActionHint = 'Review and fix crop values'
+                $skippedCount++
+                continue
+            }
+            
+            # Perform crop
+            if ($PSCmdlet.ShouldProcess("$($usage.ShapeName) on $($usage.Location)", "Crop image")) {
+                $result = Invoke-CropOperation -usage $usage -tempDir $tempDir
+                if ($result.Success) {
+                    $croppedCount++
+                } else {
+                    $skippedCount++
+                }
+            }
+        }
+        
+        Write-Progress -Activity "Processing crops" -Completed -Id 2
+        Write-Host "[STATS] Cropping phase complete: $croppedCount cropped, $skippedCount skipped" -ForegroundColor Green
+    }
+
+    function Test-CropValidity {
+        param([ImageUsage]$usage)
+        
+        $l = $usage.SrcRectLeft
+        $t = $usage.SrcRectTop
+        $r = $usage.SrcRectRight
+        $b = $usage.SrcRectBottom
+        
+        # Check bounds
+        if ($l -lt 0 -or $l -gt $script:Config.CROP_THOUSANDTHS_MAX) {
+            if (Test-VerboseMode) {
+                Write-Verbose "  Crop validation failed for '$($usage.ShapeName)': left=$l out of range [0-$($script:Config.CROP_THOUSANDTHS_MAX)]"
+            }
+            return $false
+        }
+        if ($t -lt 0 -or $t -gt $script:Config.CROP_THOUSANDTHS_MAX) {
+            if (Test-VerboseMode) {
+                Write-Verbose "  Crop validation failed for '$($usage.ShapeName)': top=$t out of range [0-$($script:Config.CROP_THOUSANDTHS_MAX)]"
+            }
+            return $false
+        }
+        if ($r -lt 0 -or $r -gt $script:Config.CROP_THOUSANDTHS_MAX) {
+            if (Test-VerboseMode) {
+                Write-Verbose "  Crop validation failed for '$($usage.ShapeName)': right=$r out of range [0-$($script:Config.CROP_THOUSANDTHS_MAX)]"
+            }
+            return $false
+        }
+        if ($b -lt 0 -or $b -gt $script:Config.CROP_THOUSANDTHS_MAX) {
+            if (Test-VerboseMode) {
+                Write-Verbose "  Crop validation failed for '$($usage.ShapeName)': bottom=$b out of range [0-$($script:Config.CROP_THOUSANDTHS_MAX)]"
+            }
+            return $false
+        }
+        
+        # Check sum
+        if (($l + $r) -ge $script:Config.CROP_THOUSANDTHS_MAX) {
+            if (Test-VerboseMode) {
+                Write-Verbose "  Crop validation failed for '$($usage.ShapeName)': left+right=$($l+$r) >= $($script:Config.CROP_THOUSANDTHS_MAX) (crops overlap horizontally)"
+            }
+            return $false
+        }
+        if (($t + $b) -ge $script:Config.CROP_THOUSANDTHS_MAX) {
+            if (Test-VerboseMode) {
+                Write-Verbose "  Crop validation failed for '$($usage.ShapeName)': top+bottom=$($t+$b) >= $($script:Config.CROP_THOUSANDTHS_MAX) (crops overlap vertically)"
+            }
+            return $false
+        }
+        
+        # Check minimum dimensions
+        $crop = Get-CropPercentage -left $l -top $t -right $r -bottom $b
+        if ($crop.WidthPercent -lt $script:Config.MIN_CROPPED_DIMENSION_PERCENT) {
+            if (Test-VerboseMode) {
+                Write-Verbose "  Crop validation failed for '$($usage.ShapeName)': resulting width $($crop.WidthPercent.ToString('F1'))% < minimum $($script:Config.MIN_CROPPED_DIMENSION_PERCENT)%"
+            }
+            return $false
+        }
+        if ($crop.HeightPercent -lt $script:Config.MIN_CROPPED_DIMENSION_PERCENT) {
+            if (Test-VerboseMode) {
+                Write-Verbose "  Crop validation failed for '$($usage.ShapeName)': resulting height $($crop.HeightPercent.ToString('F1'))% < minimum $($script:Config.MIN_CROPPED_DIMENSION_PERCENT)%"
+            }
+            return $false
+        }
+        
+        if (Test-VerboseMode) {
+            Write-Verbose "  Crop validation passed for '$($usage.ShapeName)': l=$l, t=$t, r=$r, b=$b -> $($crop.WidthPercent.ToString('F1'))%x$($crop.HeightPercent.ToString('F1'))% of original"
+        }
+        
+        return $true
+    }
+
+    function Invoke-CropOperation {
+        param(
+            [ImageUsage]$usage,
+            [string]$tempDir
+        )
+        
+        try {
+            # Get source image dimensions
+            $dims = Get-ImageDimensions -ImagePath $usage.ImagePhysicalPath
+            $srcWidth = $dims.Width
+            $srcHeight = $dims.Height
+            
+            # Store source dimensions
+            $usage.SourceWidthPx = $srcWidth
+            $usage.SourceHeightPx = $srcHeight
+            
+            # Calculate crop rectangle
+            $leftPx = [Math]::Round($srcWidth * $usage.SrcRectLeft / 100000.0)
+            $topPx = [Math]::Round($srcHeight * $usage.SrcRectTop / 100000.0)
+            $rightPx = [Math]::Round($srcWidth * $usage.SrcRectRight / 100000.0)
+            $bottomPx = [Math]::Round($srcHeight * $usage.SrcRectBottom / 100000.0)
+            
+            $cropWidth = $srcWidth - $leftPx - $rightPx
+            $cropHeight = $srcHeight - $topPx - $bottomPx
+            
+            # Clamp
+            $cropWidth = [Math]::Max(1, [Math]::Min($cropWidth, $srcWidth))
+            $cropHeight = [Math]::Max(1, [Math]::Min($cropHeight, $srcHeight))
+            $leftPx = [Math]::Max(0, [Math]::Min($leftPx, $srcWidth - 1))
+            $topPx = [Math]::Max(0, [Math]::Min($topPx, $srcHeight - 1))
+            
+            # Create output filename
+            $output = New-UniqueMediaPath -basePath $usage.ImagePhysicalPath -suffix '_cropped'
+            $outputPath = $output.Path
+            $outputName = $output.Name
+            
+            # Execute crop
+            $cropGeometry = "${cropWidth}x${cropHeight}+${leftPx}+${topPx}"
+            
+            if (Test-VerboseMode) {
+                Write-Verbose "  Materializing crop for '$($usage.ShapeName)':"
+                Write-Verbose "    Source: ${srcWidth}x${srcHeight}px"
+                Write-Verbose "    Crop values: l=$($usage.SrcRectLeft), t=$($usage.SrcRectTop), r=$($usage.SrcRectRight), b=$($usage.SrcRectBottom)"
+                Write-Verbose "    Resulting geometry: $cropGeometry (${cropWidth}x${cropHeight}px)"
+            }
+            
+            & $script:MagickExe $usage.ImagePhysicalPath -crop $cropGeometry +repage $outputPath 2>&1 | Out-Null
+            
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $outputPath)) {
+                throw "Crop operation failed"
+            }
+            
+            $beforeSize = $usage.BeforeSizeBytes
+            $afterSize = (Get-Item $outputPath).Length
+            $savedPercent = (($beforeSize - $afterSize) / $beforeSize) * 100
+            
+            if (Test-VerboseMode) {
+                Write-Verbose "    Output: $outputName [$(Format-ByteSize $beforeSize) -> $(Format-ByteSize $afterSize), saved $($savedPercent.ToString('F1'))%]"
+            }
+            
+            # Update relationship
+            $null = Update-BlipRelationship -usage $usage -tempDir $tempDir -newMediaFileName $outputName
+            
+            # Remove srcRect (sibling of blip within blipFill)
+            $blipFill = $usage.BlipElement.ParentNode
+            if ($blipFill) {
+                $srcRect = $blipFill.SelectSingleNode('a:srcRect', $script:NsMgr)
+                if ($srcRect) {
+                    $null = $srcRect.ParentNode.RemoveChild($srcRect)
+                }
+                
+                # Also reset fillRect if it has negative values (stretch crop)
+                # The crop has been materialized, so fillRect should be reset to no offset
+                $stretch = $blipFill.SelectSingleNode('a:stretch', $script:NsMgr)
+                if ($stretch) {
+                    $fillRect = $stretch.SelectSingleNode('a:fillRect', $script:NsMgr)
+                    if ($fillRect) {
+                        # Check if any attributes were negative (indicating crop)
+                        $hasNegative = $false
+                        foreach ($attr in @('l', 't', 'r', 'b')) {
+                            $val = $fillRect.GetAttribute($attr)
+                            if ($val -and [double]$val -lt 0) {
+                                $hasNegative = $true
+                                break
+                            }
+                        }
+                        
+                        if ($hasNegative) {
+                            # Remove all attributes to reset to default (no offset)
+                            $fillRect.RemoveAttribute('l')
+                            $fillRect.RemoveAttribute('t')
+                            $fillRect.RemoveAttribute('r')
+                            $fillRect.RemoveAttribute('b')
+                            Write-Verbose "    Reset fillRect attributes (crop materialized into image)"
+                        }
+                    }
+                }
+            }
+            
+            $usage.HasSrcRect = $false
+            $usage.CropApplied = $true
+            $usage.AfterSizeBytes = $afterSize
+            $usage.OptimizedFile = $outputName
+            $usage.ImagePhysicalPath = $outputPath  # CRITICAL: Update path to cropped file for optimization phase
+            
+            if (Test-VerboseMode) {
+                Write-Verbose "    Updated ImagePhysicalPath: $outputPath (optimization will use cropped file)"
+            }
+            
+            $savedPercent = (($beforeSize - $afterSize) / $beforeSize) * 100
+            Write-Host "   [CROP] Cropped '$($usage.ShapeName)' on $($usage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
+            
+            return @{ Success = $true }
+            
+        } catch {
+            Write-Warning "Crop failed for '$($usage.ShapeName)' on $($usage.Location): $_"
+            $usage.OptimizationStatus = 'Skipped_CropInvalidOrUnsafe'
+            $usage.WhyNotOptimized = "Crop operation failed: $_"
+            return @{ Success = $false }
+        }
+    }
+
+    #endregion
