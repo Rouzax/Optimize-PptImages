@@ -3633,22 +3633,45 @@ begin {
         }
         $sizeMb = [math]::Round($totalBytes / 1MB, 2)
 
-        Write-Host "`n[THINK-CELL] Detected think-cell content ($sizeMb MB)" -ForegroundColor Cyan
-
-        # Group carrying layouts and resolve which slides use them.
+        # Group carrying layouts (from the pre-cleanup scan) and partition them by whether
+        # they still exist in the final package, so the summary reflects what actually
+        # happened rather than only what was detected.
         $layoutFiles = @($tcUsages |
             Where-Object { $_.ContextType -eq [ContextType]::Layout -and $_.PartPath } |
             ForEach-Object { Split-Path $_.PartPath -Leaf } |
             Sort-Object -Unique)
-        if ($layoutFiles.Count -gt 0) {
+        $presentLayouts = [System.Collections.Generic.List[string]]::new()
+        $removedLayouts = [System.Collections.Generic.List[string]]::new()
+        foreach ($lf in $layoutFiles) {
+            if (Test-Path -LiteralPath (Join-Path $tempDir "ppt/slideLayouts/$lf")) {
+                $presentLayouts.Add($lf)
+            } else {
+                $removedLayouts.Add($lf)
+            }
+        }
+
+        # "Removed" only when everything detected is gone: no surviving layouts and no
+        # remaining add-in parts.
+        $fullyRemoved = ($removedLayouts.Count -gt 0 -and $presentLayouts.Count -eq 0 -and $tcParts.Count -eq 0)
+        if ($fullyRemoved) {
+            Write-Host "`n[THINK-CELL] Removed think-cell content ($sizeMb MB)" -ForegroundColor Cyan
+        } else {
+            Write-Host "`n[THINK-CELL] Detected think-cell content ($sizeMb MB) - still in the file" -ForegroundColor Cyan
+        }
+
+        if ($removedLayouts.Count -gt 0) {
+            $nums = ($removedLayouts | ForEach-Object { if ($_ -match '(\d+)\.xml$') { [int]$matches[1] } }) | Sort-Object -Unique
+            Write-Host "             Removed unused layouts: $($nums -join ', ')" -ForegroundColor Cyan
+        }
+        if ($presentLayouts.Count -gt 0) {
             $allSlides = [System.Collections.Generic.List[int]]::new()
-            foreach ($lf in $layoutFiles) {
+            foreach ($lf in $presentLayouts) {
                 if ($partSlideUsage.Layout.ContainsKey($lf)) {
                     $allSlides.AddRange($partSlideUsage.Layout[$lf])
                 }
             }
-            $layoutNums = ($layoutFiles | ForEach-Object { if ($_ -match '(\d+)\.xml$') { [int]$matches[1] } }) | Sort-Object -Unique
-            Write-Host "             Carried by layouts: $($layoutNums -join ', ')" -ForegroundColor Cyan
+            $nums = ($presentLayouts | ForEach-Object { if ($_ -match '(\d+)\.xml$') { [int]$matches[1] } }) | Sort-Object -Unique
+            Write-Host "             Carried by layouts: $($nums -join ', ')" -ForegroundColor Cyan
             Write-Host "             Used on slides: $(Format-SlideList $allSlides)" -ForegroundColor Cyan
             if ($allSlides.Count -eq 0 -and -not $script:CleanUnusedLayouts) {
                 Write-Host "             These layouts are unused; run with -CleanUnusedLayouts to remove them." -ForegroundColor Cyan
