@@ -5,6 +5,9 @@ CLAUDE.md
 # Temp / scratch
 _temp/
 
+# Local working notes
+TODO.md
+
 # Test fixture decks (generated at test time or supplied locally; never commit binaries)
 tests/fixtures/*.pptx
 tests/fixtures/*.potx

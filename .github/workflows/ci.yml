@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+# Least privilege: CI only needs to read the repo.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Install PowerShell modules
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -MinimumVersion 5.3.0 -Force -SkipPublisherCheck -Scope CurrentUser
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+
+      - name: Import module
+        shell: pwsh
+        run: Import-Module ./Optimize-PptImages.psd1 -Force; Write-Host 'Module import OK'
+
+      - name: Run Pester tests
+        shell: pwsh
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path = 'tests'
+          $config.Run.Exit = $true            # non-zero exit on test failure fails the job
+          $config.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $config
+
+      - name: PSScriptAnalyzer (fail on errors)
+        shell: pwsh
+        run: |
+          # Gate on Error severity only. Warnings (e.g. intentional Write-Host for console
+          # UX, and dynamic-scope parameter usage) are reported but do not fail the build.
+          $findings = @()
+          $findings += Invoke-ScriptAnalyzer -Path ./src -Recurse -Severity Error
+          $findings += Invoke-ScriptAnalyzer -Path ./Optimize-PptImages.ps1 -Severity Error
+          $findings += Invoke-ScriptAnalyzer -Path ./Optimize-PptImages.psm1 -Severity Error
+          if ($findings.Count -gt 0) {
+              $findings | Format-Table -AutoSize
+              throw "PSScriptAnalyzer found $($findings.Count) error-severity finding(s)"
+          }
+          Write-Host 'PSScriptAnalyzer: 0 errors'

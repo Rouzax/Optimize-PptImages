@@ -17,8 +17,9 @@ A cross-platform PowerShell script that intelligently optimizes PowerPoint prese
     - [Platform Support](#platform-support)
   - [Installation](#installation)
     - [1. Install ImageMagick](#1-install-imagemagick)
-    - [2. Download the Script](#2-download-the-script)
+    - [2. Clone the Repository](#2-clone-the-repository)
     - [3. Verify Installation](#3-verify-installation)
+    - [Repository Layout](#repository-layout)
   - [Usage](#usage)
     - [Basic Examples](#basic-examples)
     - [Batch Processing](#batch-processing)
@@ -123,16 +124,20 @@ Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -OptimizeSlides -CropSlides
 
 ### Core Requirements
 
-- **PowerShell:** 5.1+ (Windows) or PowerShell Core 7+ (macOS/Linux)
+- **PowerShell:** 7.0 or later (PowerShell Core). Windows PowerShell 5.1 is no longer supported.
 - **ImageMagick:** Version 7.x or later
+
+### Optional Requirements
+
+- **DocumentFormat.OpenXml** -- required only when using `-ValidateOutput`. Install via NuGet. Not needed for any other feature.
 
 ### Platform Support
 
 | Platform | PowerShell Version | Status |
 |----------|-------------------|--------|
-| Windows | 5.1+, Core 7+ | Supported |
-| macOS | Core 7+ | Supported |
-| Linux | Core 7+ | Supported |
+| Windows | PowerShell 7.0+ | Supported |
+| macOS | PowerShell 7.0+ | Supported |
+| Linux | PowerShell 7.0+ | Supported |
 
 ---
 
@@ -158,22 +163,49 @@ brew install imagemagick
 sudo apt update && sudo apt install imagemagick
 ```
 
-### 2. Download the Script
+### 2. Clone the Repository
+
+The tool is a PowerShell module spread across multiple files, so cloning the repository is required.
 
 ```powershell
-# Clone the repository
 git clone https://github.com/Rouzax/Optimize-PptImages.git
 cd Optimize-PptImages
-
-# Or download directly
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Rouzax/Optimize-PptImages/main/Optimize-PptImages.ps1" -OutFile "Optimize-PptImages.ps1"
 ```
+
+**Running the tool:**
+
+Option A -- run the entry-point script directly (same invocation as always):
+
+```powershell
+.\Optimize-PptImages.ps1 -InputPath "presentation.pptx" -All
+```
+
+Option B -- import the module and call the exported function directly (useful for scripting and automation):
+
+```powershell
+Import-Module ./Optimize-PptImages.psd1
+Invoke-PptImageOptimization -InputPath "presentation.pptx" -All
+```
+
+Both options accept the same parameters and support pipeline input.
 
 ### 3. Verify Installation
 
 ```powershell
 magick --version
+pwsh --version
 ```
+
+### Repository Layout
+
+| Path | Purpose |
+|------|---------|
+| `Optimize-PptImages.ps1` | Thin entry-point script; imports the module and forwards all parameters |
+| `Optimize-PptImages.psm1` | Module root; dot-sources the `src/` files |
+| `Optimize-PptImages.psd1` | Module manifest |
+| `src/` | Focused source files (Config, Classes, Common, ImageMagick, Xml, Relationships, Initialization, Structure, Scanning, Morph, Cropping, Optimization, LayoutCleanup, Cleanup, Validation, Reporting, Pipeline) |
+| `src/Public/Invoke-PptImageOptimization.ps1` | The exported public function |
+| `tests/` | Pester 5 test suite |
 
 ---
 
