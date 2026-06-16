@@ -4,3 +4,7 @@ CLAUDE.md
 
 # Temp / scratch
 _temp/
+
+# Test fixture decks (generated at test time or supplied locally; never commit binaries)
+tests/fixtures/*.pptx
+tests/fixtures/*.potx
