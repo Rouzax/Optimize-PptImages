@@ -67,12 +67,20 @@ param(
     [string]$CsvReportPath,
 
     [Parameter(Mandatory=$false)]
-    [switch]$PassThru
+    [switch]$PassThru,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$Interactive
 )
 
     begin {
         Set-StrictMode -Version Latest
         $ErrorActionPreference = 'Stop'
+
+        # Guard: -Interactive only works for a single file
+        if ($Interactive -and $MyInvocation.ExpectingInput) {
+            throw "Interactive mode supports a single file only. Run without pipeline/batch input, or drop -Interactive."
+        }
 
         # Track batch processing results
         $script:BatchResults = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -107,8 +115,67 @@ param(
         Write-Host ("`n" + ("=" * 60)) -ForegroundColor DarkGray
     }
     
+    if ($Interactive) {
+        if ($script:FileCount -gt 1 -or $MyInvocation.ExpectingInput) {
+            throw "Interactive mode supports a single file only. Run without pipeline/batch input, or drop -Interactive."
+        }
+
+        $context = Get-PptImageScan -InputPath $InputPath -MagickPath $MagickPath
+        $handedOff = $false
+        try {
+            $defaults = [PSCustomObject]@{
+                OptimizeSlides               = $script:OptimizeSlides
+                OptimizeMastersAndLayouts    = $script:OptimizeMastersAndLayouts
+                CropSlides                   = $script:CropSlides
+                CropMastersAndLayouts        = $script:CropMastersAndLayouts
+                CleanUnusedLayouts           = $script:CleanUnusedLayouts
+                HeadroomFactor               = $HeadroomFactor
+                JpegQuality                  = $JpegQuality
+                OutputPath                   = if ($OutputPath) { $OutputPath } else { '' }
+                TransparencyThresholdPercent = $TransparencyThresholdPercent
+                MinSavingsPercent            = $MinSavingsPercent
+                IncludeSlides                = if ($IncludeSlides) { @($IncludeSlides) } else { @() }
+                ExcludeSlides                = if ($ExcludeSlides) { @($ExcludeSlides) } else { @() }
+            }
+
+            $wiz = Show-PptInteractiveWizard -InputPath $InputPath -Findings $context.Findings -Defaults $defaults
+
+            if ($wiz.Action -ne 'Run') {
+                if ($wiz.Action -eq 'Copy') {
+                    Write-Host ''
+                    Write-Host (Format-PptCommandLine -InputPath $InputPath -Answers $wiz.Answers) -ForegroundColor Green
+                }
+                return
+            }
+
+            $a = $wiz.Answers
+            $script:OptimizeSlides            = $a.OptimizeSlides
+            $script:OptimizeMastersAndLayouts = $a.OptimizeMastersAndLayouts
+            $script:CropSlides                = $a.CropSlides
+            $script:CropMastersAndLayouts     = $a.CropMastersAndLayouts
+            $script:CleanUnusedLayouts        = $a.CleanUnusedLayouts
+            $HeadroomFactor               = $a.HeadroomFactor
+            $JpegQuality                  = $a.JpegQuality
+            $TransparencyThresholdPercent = $a.TransparencyThresholdPercent
+            $MinSavingsPercent            = $a.MinSavingsPercent
+            if ($a.OutputPath)    { $OutputPath = $a.OutputPath }
+            if ($a.IncludeSlides -and $a.IncludeSlides.Count -gt 0) { $IncludeSlides = $a.IncludeSlides }
+            if ($a.ExcludeSlides -and $a.ExcludeSlides.Count -gt 0) { $ExcludeSlides = $a.ExcludeSlides }
+
+            Write-Host "`n[FILE] Processing file $($script:FileCount): $(Split-Path $InputPath -Leaf)" -ForegroundColor Cyan
+            $handedOff = $true
+            $result = Invoke-PptOptimization -CurrentInputPath $InputPath -PreparedScan $context
+            $script:BatchResults.Add($result)
+        } finally {
+            if (-not $handedOff -and $context.TempDir -and (Test-Path -LiteralPath $context.TempDir)) {
+                Remove-Item -LiteralPath $context.TempDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+        return
+    }
+
     Write-Host "`n[FILE] Processing file $($script:FileCount): $(Split-Path $InputPath -Leaf)" -ForegroundColor Cyan
-    
+
     $result = Invoke-PptOptimization -CurrentInputPath $InputPath
     $script:BatchResults.Add($result)
     }

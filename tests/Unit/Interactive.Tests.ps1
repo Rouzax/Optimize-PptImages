@@ -182,6 +182,19 @@ Describe 'Format-PptFindingsSummary' {
     }
 }
 
+Describe '-Interactive batch guard' {
+    It 'errors when interactive is combined with multiple pipeline inputs' {
+        $err = $null
+        try {
+            'a.pptx', 'b.pptx' | Invoke-PptImageOptimization -Interactive -ErrorAction Stop 2>$null
+        } catch {
+            $err = $_
+        }
+        $err | Should -Not -BeNullOrEmpty
+        "$err" | Should -BeLike '*single file*'
+    }
+}
+
 Describe 'Show-PptInteractiveWizard' {
     BeforeEach {
         InModuleScope Optimize-PptImages {

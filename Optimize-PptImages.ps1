@@ -67,7 +67,10 @@ param(
     [string]$CsvReportPath,
 
     [Parameter(Mandatory=$false)]
-    [switch]$PassThru
+    [switch]$PassThru,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$Interactive
 )
 
 begin {
