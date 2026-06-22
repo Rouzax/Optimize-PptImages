@@ -470,6 +470,16 @@
         $targetWidth  = [Math]::Min($srcWidth,  $desiredWidth)
         $targetHeight = [Math]::Min($srcHeight, $desiredHeight)
 
+        # Write source and target dims onto every usage so the CSV report has accurate values.
+        # This mirrors the placement in Invoke-OptimizationOperation and runs regardless of which
+        # branch (skip, convert, resize) follows.
+        foreach ($usage in $group.Usages) {
+            $usage.SourceWidthPx  = $srcWidth
+            $usage.SourceHeightPx = $srcHeight
+            $usage.TargetWidthPx  = $targetWidth
+            $usage.TargetHeightPx = $targetHeight
+        }
+
         $ext = [System.IO.Path]::GetExtension($group.PhysicalPath).ToLower()
 
         # JPEG: check if already at optimal quality and size.

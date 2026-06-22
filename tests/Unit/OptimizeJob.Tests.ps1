@@ -44,6 +44,10 @@ Describe 'Get-OptimizationJob (pure build)' {
             $job.StatusName | Should -Be 'OptimizedJpeg'
             $job.MagickArgs[0] | Should -Be '/tmp/x/image1.jpeg'
             $job.MagickArgs[-1] | Should -Be $job.ScratchPath
+            # FIX 3: dims must be written onto usages for CSV report fidelity.
+            # HeadroomFactor=2.0, display=800 => desiredWidth=1600; target=Min(4000,1600)=1600.
+            $g.Usages[0].SourceWidthPx  | Should -Be 4000
+            $g.Usages[0].TargetWidthPx  | Should -Be 1600
         }
     }
 
@@ -67,6 +71,33 @@ Describe 'Get-OptimizationJob (pure build)' {
             $job = Get-OptimizationJob -group $g -maxDisplay @{ Width = 800; Height = 600 } -scratchDir '/tmp/scratch'
             $job | Should -BeNullOrEmpty
             $g.Usages[0].OptimizationStatus | Should -Be 'Skipped_AlreadyOptimal'
+        }
+    }
+
+    It 'builds a ConvertedToJpeg job for an oversized opaque BMP (convertible format)' {
+        InModuleScope Optimize-PptImages {
+            $HeadroomFactor = 2.0; $JpegQuality = 95; $TransparencyThresholdPercent = 0.1
+            function New-Grp {
+                param($Path, $SrcW, $SrcH, $DispW, $DispH, $Bytes, $Transp = 0, $Quality = -1)
+                $u = [ImageUsage]::new()
+                $u.ImagePhysicalPath = $Path; $u.OriginalFileName = (Split-Path $Path -Leaf)
+                $u.ContextType = [ContextType]::Slide; $u.SlideNumber = 1
+                $u.SourceWidthPx = $SrcW; $u.SourceHeightPx = $SrcH
+                $u.DisplayWidthPx = $DispW; $u.DisplayHeightPx = $DispH
+                $u.EffectiveTransparencyPercent = $Transp; $u.SourceJpegQuality = $Quality
+                $u.OptimizationStatus = 'Pending'
+                $g = [ImageGroup]::new(); $g.PhysicalPath = $Path; $g.OriginalSizeBytes = $Bytes
+                $g.Usages.Add($u)
+                return $g
+            }
+            # Oversized opaque BMP: src 3000x2000, display 600x400, no transparency.
+            # CONVERTIBLE_FORMATS = @('.bmp', '.tif', '.tiff', '.gif')
+            $g = New-Grp '/tmp/x/image.bmp' 3000 2000 600 400 900000 0 -1
+            $job = Get-OptimizationJob -group $g -maxDisplay @{ Width = 600; Height = 400 } -scratchDir '/tmp/scratch'
+            $job | Should -Not -BeNullOrEmpty
+            $job.Operation   | Should -Be 'ConvertedToJpeg'
+            $job.StatusName  | Should -Be 'ConvertedToJpeg'
+            $job.NewExtension | Should -Be '.jpeg'
         }
     }
 
