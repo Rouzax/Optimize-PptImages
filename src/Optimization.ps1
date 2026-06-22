@@ -160,19 +160,21 @@
             }
         }
         
-        # Capture source dimensions for reporting, even if image will be skipped
-        try {
-            $dims = Get-ImageDimensions -ImagePath $group.PhysicalPath
-            
-            # Store in all usages for CSV reporting
-            foreach ($usage in $group.Usages) {
-                if ($usage.SourceWidthPx -eq 0) {
-                    $usage.SourceWidthPx = $dims.Width
-                    $usage.SourceHeightPx = $dims.Height
+        # Source dimensions are front-loaded in parallel before optimization. Probe here
+        # only as a fallback for any usage whose parallel probe failed (still 0).
+        if ($group.Usages | Where-Object { $_.SourceWidthPx -eq 0 }) {
+            try {
+                $dims = Get-ImageDimensions -ImagePath $group.PhysicalPath
+
+                foreach ($usage in $group.Usages) {
+                    if ($usage.SourceWidthPx -eq 0) {
+                        $usage.SourceWidthPx = $dims.Width
+                        $usage.SourceHeightPx = $dims.Height
+                    }
                 }
+            } catch {
+                # Silently continue if dimension capture fails
             }
-        } catch {
-            # Silently continue if dimension capture fails
         }
         
         # Check SVG fallback
@@ -254,10 +256,17 @@
         )
         
         try {
-            # Get source dimensions
-            $dims = Get-ImageDimensions -ImagePath $group.PhysicalPath
-            $srcWidth = $dims.Width
-            $srcHeight = $dims.Height
+            # Source dimensions are front-loaded in parallel; read the cached value and
+            # fall back to a live probe only if it is still missing.
+            $known = $group.Usages | Where-Object { $_.SourceWidthPx -gt 0 } | Select-Object -First 1
+            if ($known) {
+                $srcWidth = $known.SourceWidthPx
+                $srcHeight = $known.SourceHeightPx
+            } else {
+                $dims = Get-ImageDimensions -ImagePath $group.PhysicalPath
+                $srcWidth = $dims.Width
+                $srcHeight = $dims.Height
+            }
             
             # Calculate target size
             $desiredWidth = [Math]::Ceiling($maxDisplay.Width * $HeadroomFactor)

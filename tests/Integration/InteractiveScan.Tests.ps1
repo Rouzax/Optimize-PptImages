@@ -136,3 +136,41 @@ Describe 'Non-interactive run front-loads source dimensions' {
         }
     }
 }
+
+Describe 'Front-loaded dims eliminate the sequential probes' {
+    It 'does not call Get-ImageDimensions during a normal optimize run' {
+        InModuleScope Optimize-PptImages -Parameters @{ deck = $script:deck } {
+            param($deck)
+            $script:OptimizeSlides = $true
+            $script:OptimizeMastersAndLayouts = $false
+            $script:CropSlides = $false
+            $script:CropMastersAndLayouts = $false
+            $script:CleanUnusedLayouts = $false
+            $script:ValidateOutput = $false
+
+            # The parallel front-load invokes magick directly inside runspaces, NOT
+            # Get-ImageDimensions, so after Task 3 the main-runspace probes are gone.
+            Mock Get-ImageDimensions { throw "Get-ImageDimensions should not be called when dims are front-loaded" }
+
+            $MagickPath = $null
+            $OutputPath = $null
+            $CsvReportPath = $null
+            $IncludeSlides = @()
+            $ExcludeSlides = @()
+            $HeadroomFactor = 2.0
+            $JpegQuality = 95
+            $TransparencyThresholdPercent = 0.1
+            $MinSavingsPercent = 0.0
+
+            $result = Invoke-PptOptimization -CurrentInputPath $deck
+            try {
+                $result.Success | Should -BeTrue
+                Should -Invoke Get-ImageDimensions -Times 0 -Exactly
+            } finally {
+                foreach ($p in @($result.OutputPath, $result.ReportPath)) {
+                    if ($p -and (Test-Path -LiteralPath $p)) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
+                }
+            }
+        }
+    }
+}
