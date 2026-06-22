@@ -68,13 +68,24 @@
         $totalGroups = $inScopeGroups.Count
         $currentGroup = 0
 
-        # Build a flat list of usages from in-scope groups and run the parallel probe
-        # pre-pass. Probing only in-scope groups preserves work scoping.
-        $inScopeUsages = [System.Collections.Generic.List[ImageUsage]]::new()
+        # Sub-pass: compute skip reasons BEFORE probing so that skipped files are never
+        # probed. Each entry pairs the group with its cached skip reason (or $null if the
+        # group should be optimized). Survivor usages (skip reason is $null) are collected
+        # for the parallel probe. This restores sequential-code behavior: skipped files
+        # never had SourceJpegQuality or EffectiveTransparencyPercent set, so their CSV
+        # columns remain at default values.
+        $groupSkipPairs = [System.Collections.Generic.List[PSCustomObject]]::new()
+        $survivorUsages = [System.Collections.Generic.List[ImageUsage]]::new()
         foreach ($g in $inScopeGroups) {
-            foreach ($u in $g.Usages) { $inScopeUsages.Add($u) }
+            $skipReason = Get-OptimizationSkipReason -group $g
+            $groupSkipPairs.Add([PSCustomObject]@{ Group = $g; SkipReason = $skipReason })
+            if ($null -eq $skipReason) {
+                foreach ($u in $g.Usages) { $survivorUsages.Add($u) }
+            }
         }
-        Update-OptimizeProbesParallel -usages $inScopeUsages
+
+        # Probe only surviving (non-skipped) usages.
+        Update-OptimizeProbesParallel -usages $survivorUsages
 
         $scratchDir = Join-Path $tempDir '.opt-scratch'
         New-Item -ItemType Directory -Path $scratchDir -Force | Out-Null
@@ -87,7 +98,8 @@
         $jobs = [System.Collections.Generic.List[OptimizeJob]]::new()
         $groupJobPairs = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-        foreach ($group in $inScopeGroups) {
+        foreach ($pair in $groupSkipPairs) {
+            $group = $pair.Group
             $mediaFile = Split-Path $group.PhysicalPath -Leaf
 
             # Slide-filter check (duplicates the $inScopeGroups pre-filter for the
@@ -104,8 +116,8 @@
             Write-Progress -Activity "Optimizing images" -Status "Preparing: $mediaFile ($currentGroup of $totalGroups)" `
                 -PercentComplete (($currentGroup / [Math]::Max(1, $totalGroups)) * 100) -Id 3
 
-            # Check if optimization is forbidden for this group.
-            $skipReason = Get-OptimizationSkipReason -group $group
+            # Use the cached skip reason from the sub-pass (never re-call Get-OptimizationSkipReason).
+            $skipReason = $pair.SkipReason
             if ($skipReason) {
                 foreach ($usage in $group.Usages) {
                     if ($usage.OptimizationStatus -eq 'Pending') {
@@ -318,9 +330,13 @@
         $convertibleFormats = $script:Config.CONVERTIBLE_FORMATS
 
         # Group by physical path and filter to only files that need probing.
+        # Transparency is probed for .png and non-BMP convertibles (.tif/.tiff/.gif) only.
+        # BMP is excluded: the old code never probed BMP transparency, so it always
+        # converted to JPEG. Probing BMP would change the output format for transparent
+        # BMPs and populate the CSV column where the old report had 0.
         $uniqueGroups = @($usages | Group-Object -Property ImagePhysicalPath | Where-Object {
             $ext = [System.IO.Path]::GetExtension($_.Name).ToLower()
-            $ext -in @('.png', '.jpg', '.jpeg') -or $ext -in $convertibleFormats
+            $ext -in @('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.gif')
         })
 
         $rawResults = @()
@@ -336,7 +352,7 @@
                 $ext  = $_.Ext
                 if (-not (Test-Path -LiteralPath $path)) {
                     [PSCustomObject]@{ Path = $path; Kind = 'none'; Raw = $null }
-                } elseif ($ext -eq '.png' -or $ext -in $using:convertibleFormats) {
+                } elseif ($ext -in @('.png', '.tif', '.tiff', '.gif')) {
                     $out = & $using:magickExe $path -alpha extract -format "%[fx:100*(1-mean)]" info: 2>&1
                     if ($LASTEXITCODE -ne 0) {
                         [PSCustomObject]@{ Path = $path; Kind = 'transparency'; Raw = $null }
@@ -563,9 +579,12 @@
         }
 
         # Convertible formats (BMP, TIFF, GIF): read cached transparency.
+        # BMP is always treated as opaque regardless of the probed value: the old code
+        # never probed BMP transparency, so BMP always converted to JPEG. Maintaining
+        # that behavior preserves content identity with pre-parallel-optimize output.
         if ($ext -in $script:Config.CONVERTIBLE_FORMATS) {
             $transp = $knownUsage.EffectiveTransparencyPercent
-            if ($transp -gt $TransparencyThresholdPercent) {
+            if ($ext -ne '.bmp' -and $transp -gt $TransparencyThresholdPercent) {
                 $outExt = '.png'
             } else {
                 $outExt = '.jpeg'

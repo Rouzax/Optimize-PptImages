@@ -216,6 +216,62 @@ Describe 'Get-OptimizationJob (pure build)' {
         }
     }
 
+    It 'builds a ConvertedToJpeg job for a transparent BMP (BMP is always treated as opaque)' {
+        # BMP transparency is never probed. Even if EffectiveTransparencyPercent were set
+        # to a high value, BMP must always produce ConvertedToJpeg, not ConvertedToPng.
+        # This matches the sequential code which excluded .bmp from the transparency probe.
+        InModuleScope Optimize-PptImages {
+            $HeadroomFactor = 2.0; $JpegQuality = 95; $TransparencyThresholdPercent = 0.1
+            function New-Grp {
+                param($Path, $SrcW, $SrcH, $DispW, $DispH, $Bytes, $Transp = 0, $Quality = -1)
+                $u = [ImageUsage]::new()
+                $u.ImagePhysicalPath = $Path; $u.OriginalFileName = (Split-Path $Path -Leaf)
+                $u.ContextType = [ContextType]::Slide; $u.SlideNumber = 1
+                $u.SourceWidthPx = $SrcW; $u.SourceHeightPx = $SrcH
+                $u.DisplayWidthPx = $DispW; $u.DisplayHeightPx = $DispH
+                $u.EffectiveTransparencyPercent = $Transp; $u.SourceJpegQuality = $Quality
+                $u.OptimizationStatus = 'Pending'
+                $g = [ImageGroup]::new(); $g.PhysicalPath = $Path; $g.OriginalSizeBytes = $Bytes
+                $g.Usages.Add($u)
+                return $g
+            }
+            # BMP with high transparency value (as if probed): must still produce JPEG.
+            $g = New-Grp '/tmp/x/image.bmp' 3000 2000 600 400 900000 40 -1
+            $job = Get-OptimizationJob -group $g -maxDisplay @{ Width = 600; Height = 400 } -scratchDir '/tmp/scratch'
+            $job | Should -Not -BeNullOrEmpty
+            $job.Operation   | Should -Be 'ConvertedToJpeg'
+            $job.StatusName  | Should -Be 'ConvertedToJpeg'
+            $job.NewExtension | Should -Be '.jpeg'
+        }
+    }
+
+    It 'builds a ConvertedToPng job for a transparent GIF (non-BMP convertibles honor transparency)' {
+        # .tif/.tiff/.gif are probed for transparency and produce PNG when transparent.
+        InModuleScope Optimize-PptImages {
+            $HeadroomFactor = 2.0; $JpegQuality = 95; $TransparencyThresholdPercent = 0.1
+            function New-Grp {
+                param($Path, $SrcW, $SrcH, $DispW, $DispH, $Bytes, $Transp = 0, $Quality = -1)
+                $u = [ImageUsage]::new()
+                $u.ImagePhysicalPath = $Path; $u.OriginalFileName = (Split-Path $Path -Leaf)
+                $u.ContextType = [ContextType]::Slide; $u.SlideNumber = 1
+                $u.SourceWidthPx = $SrcW; $u.SourceHeightPx = $SrcH
+                $u.DisplayWidthPx = $DispW; $u.DisplayHeightPx = $DispH
+                $u.EffectiveTransparencyPercent = $Transp; $u.SourceJpegQuality = $Quality
+                $u.OptimizationStatus = 'Pending'
+                $g = [ImageGroup]::new(); $g.PhysicalPath = $Path; $g.OriginalSizeBytes = $Bytes
+                $g.Usages.Add($u)
+                return $g
+            }
+            # Transparent GIF: EffectiveTransparencyPercent = 40 (above threshold 0.1).
+            $g = New-Grp '/tmp/x/image.gif' 3000 2000 600 400 900000 40 -1
+            $job = Get-OptimizationJob -group $g -maxDisplay @{ Width = 600; Height = 400 } -scratchDir '/tmp/scratch'
+            $job | Should -Not -BeNullOrEmpty
+            $job.Operation   | Should -Be 'ConvertedToPng'
+            $job.StatusName  | Should -Be 'ConvertedToPng'
+            $job.NewExtension | Should -Be '.png'
+        }
+    }
+
     It 'builds a ConvertPngToJpeg job for an opaque PNG' {
         InModuleScope Optimize-PptImages {
             $HeadroomFactor = 2.0; $JpegQuality = 95; $TransparencyThresholdPercent = 0.1
