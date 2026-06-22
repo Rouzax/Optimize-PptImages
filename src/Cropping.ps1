@@ -230,18 +230,18 @@
             if ($null -eq $job) {
                 # Get-CropJob set the status. Emit console messages and tally based on what was decided.
                 if ($usage.CropRemovedNoOp) {
-                    # No-op crop removed: emit [NOTE] and do NOT count as skipped (matches old behavior).
-                    Write-Host "   [NOTE] Removed no-op crop for '$($usage.ShapeName)' on $($usage.Location) (full image)" -ForegroundColor Cyan
+                    # No-op crop removed: routine informational, route to verbose.
+                    Write-Verbose "   [NOTE] Removed no-op crop for '$($usage.ShapeName)' on $($usage.Location) (full image)"
                     continue
                 }
 
                 switch ($usage.OptimizationStatus) {
                     'Skipped_SvgFallback' {
-                        Write-Host "   [SKIP] Skipped crop for '$($usage.ShapeName)' on $($usage.Location): SVG fallback (PowerPoint regenerates)" -ForegroundColor Gray
+                        Write-Verbose "   [SKIP] Skipped crop for '$($usage.ShapeName)' on $($usage.Location): SVG fallback (PowerPoint regenerates)"
                         $skippedCount++
                     }
                     'Skipped_AnimatedGif' {
-                        Write-Host "   [SKIP] Skipped crop for '$($usage.ShapeName)' on $($usage.Location): animated GIF (would break animation)" -ForegroundColor Gray
+                        Write-Verbose "   [SKIP] Skipped crop for '$($usage.ShapeName)' on $($usage.Location): animated GIF (would break animation)"
                         $skippedCount++
                     }
                     'Skipped_CropNotMaterialized' {
@@ -572,7 +572,7 @@
 
         $beforeSize    = $job.BeforeSize
         $savedPercent  = if ($beforeSize -gt 0) { (($beforeSize - $afterSize) / $beforeSize) * 100 } else { 0 }
-        Write-Host "   [CROP] Cropped '$($u.ShapeName)' on $($u.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
+        Write-Verbose "   [CROP] Cropped '$($u.ShapeName)' on $($u.Location) (saved $($savedPercent.ToString('F1'))%)"
 
         return @{ Success = $true }
     }
