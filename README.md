@@ -424,9 +424,7 @@ The script detects Morph transitions and:
 [NOTE] Corrected illegal crop values for 'Picture 3' on Slide 20 (r:-12038->0, b:-182512->0)
 
 [CROP] Processing image crops...
-   [CROP] Cropped 'Picture 6' on Slide 4 (saved 71.8%)
    [BLOCK] Morph crop conflict for 'Picture 3' across Slide 18 <-> 17 (skipping crop & optimization)
-   [SKIP] Skipped crop for 'Picture 3' on Slide 26: animated GIF (would break animation)
 [STATS] Cropping phase complete: 6 cropped, 3 skipped
 
 [PROC] Optimizing images...
@@ -453,7 +451,7 @@ The script detects Morph transitions and:
 [OUT] Report: D:\Temp\PowerPoint\Test Deck.optimized.opt-report.csv
 ```
 
-By default, routine per-image detail (`[OK]`, `[CONV]`, `[INFO]` lines showing savings percentages) is suppressed. To see it, add `-Verbose`.
+By default, routine per-image detail (`[OK]`, `[CONV]`, `[INFO]` lines showing savings percentages) and per-image crop detail (`[CROP]` success lines) are suppressed. To see them, add `-Verbose`.
 
 Items that require your attention still appear at normal verbosity. `[SKIP]` lines with a suggested flag (for example, "add `-CropSlides`") are shown in gray so you can see which images were skipped and why.
 
@@ -729,7 +727,7 @@ If optimized file is larger:
 | Medium (50 slides, 30 images) | 1-2 minutes |
 | Large (100 slides, 100 images) | 3-5 minutes |
 
-Image probing (transparency analysis, JPEG quality detection) and the ImageMagick resize/convert work both run in parallel across CPU cores. Decks with many images benefit the most from this; the improvement scales with core count.
+Image probing (transparency analysis, JPEG quality detection), image cropping, and the ImageMagick resize/convert work all run in parallel across CPU cores. Decks with many images benefit the most from this; the improvement scales with core count.
 
 ### Resource Usage
 

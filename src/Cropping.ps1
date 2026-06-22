@@ -477,7 +477,7 @@
             $usage.SourceHeightPx = $srcHeight
         }
 
-        # Compute crop geometry exactly as Invoke-CropOperation does
+        # Compute crop geometry in pixels from the srcRect percentages
         $leftPx   = [Math]::Round($srcWidth  * $usage.SrcRectLeft   / 100000.0)
         $topPx    = [Math]::Round($srcHeight * $usage.SrcRectTop    / 100000.0)
         $rightPx  = [Math]::Round($srcWidth  * $usage.SrcRectRight  / 100000.0)
