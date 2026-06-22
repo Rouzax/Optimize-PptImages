@@ -645,6 +645,53 @@
         }
     }
 
+    # Probe each unique media file's source dimensions (and optionally opacity) in
+    # parallel, then apply the results to the usages in place. Runspaces only invoke
+    # magick and return raw strings; parsing is sequential via ConvertFrom-MagickFacts.
+    # Uses $script:MagickExe. Tolerates an empty usage list (the parallel block is skipped).
+    function Update-SourceDimensionsParallel {
+        param(
+            [System.Collections.Generic.List[ImageUsage]]$usages,
+            [switch]$IncludeOpacity
+        )
+
+        $magickExe = $script:MagickExe
+        $uniqueGroups = @($usages | Group-Object -Property ImagePhysicalPath)
+        $rawFacts = @()
+        if ($uniqueGroups.Count -gt 0) {
+            $rawFacts = @($uniqueGroups.Name) | ForEach-Object -Parallel {
+                $path = $_
+                if (-not (Test-Path -LiteralPath $path)) {
+                    [PSCustomObject]@{ Path = $path; Raw = $null }
+                } else {
+                    $out = & $using:magickExe identify -format "%w %h %[opaque]" $path 2>&1
+                    if ($LASTEXITCODE -ne 0) {
+                        [PSCustomObject]@{ Path = $path; Raw = $null }
+                    } else {
+                        if ($out -is [array]) { $out = $out[0] }
+                        [PSCustomObject]@{ Path = $path; Raw = "$out" }
+                    }
+                }
+            } -ThrottleLimit ([Environment]::ProcessorCount)
+        }
+
+        $factsMap = @{}
+        foreach ($rf in $rawFacts) {
+            if ($rf.Raw) { $factsMap[$rf.Path] = (ConvertFrom-MagickFacts -Raw $rf.Raw) }
+        }
+        foreach ($g in $uniqueGroups) {
+            if (-not $factsMap.ContainsKey($g.Name)) { continue }
+            $f = $factsMap[$g.Name]
+            foreach ($u in $g.Group) {
+                $u.SourceWidthPx = $f.Width
+                $u.SourceHeightPx = $f.Height
+                if ($IncludeOpacity) {
+                    $u.EffectiveTransparencyPercent = if ($f.IsOpaque) { 0 } else { 100 }
+                }
+            }
+        }
+    }
+
     # Self-contained scan for the interactive wizard: validate, extract, scan, enrich
     # source dimensions and opacity (in parallel), and compute findings. Returns a live
     # context; the CALLER owns and must clean up context.TempDir. Writes no output files.
@@ -674,41 +721,8 @@
 
             $scan = Get-PptImageScanData -tempDir $tempDir
 
-            # Enrich each unique media file with real source dimensions and opacity.
-            # Runspaces only invoke magick and return raw strings; parsing is sequential.
-            $magickExe = $script:MagickExe
-            $uniqueGroups = @($scan.Usages | Group-Object -Property ImagePhysicalPath)
-            $rawFacts = @()
-            if ($uniqueGroups.Count -gt 0) {
-                $rawFacts = @($uniqueGroups.Name) | ForEach-Object -Parallel {
-                    $path = $_
-                    if (-not (Test-Path -LiteralPath $path)) {
-                        [PSCustomObject]@{ Path = $path; Raw = $null }
-                    } else {
-                        $out = & $using:magickExe identify -format "%w %h %[opaque]" $path 2>&1
-                        if ($LASTEXITCODE -ne 0) {
-                            [PSCustomObject]@{ Path = $path; Raw = $null }
-                        } else {
-                            if ($out -is [array]) { $out = $out[0] }
-                            [PSCustomObject]@{ Path = $path; Raw = "$out" }
-                        }
-                    }
-                } -ThrottleLimit ([Environment]::ProcessorCount)
-            }
-
-            $factsMap = @{}
-            foreach ($rf in $rawFacts) {
-                if ($rf.Raw) { $factsMap[$rf.Path] = (ConvertFrom-MagickFacts -Raw $rf.Raw) }
-            }
-            foreach ($g in $uniqueGroups) {
-                if (-not $factsMap.ContainsKey($g.Name)) { continue }
-                $f = $factsMap[$g.Name]
-                foreach ($u in $g.Group) {
-                    $u.SourceWidthPx = $f.Width
-                    $u.SourceHeightPx = $f.Height
-                    $u.EffectiveTransparencyPercent = if ($f.IsOpaque) { 0 } else { 100 }
-                }
-            }
+            # Enrich each unique media file with source dimensions and opacity (parallel).
+            Update-SourceDimensionsParallel -usages $scan.Usages -IncludeOpacity
 
             return [PSCustomObject]@{
                 Findings        = (Get-PptImageFindings -usages $scan.Usages)
