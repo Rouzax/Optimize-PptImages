@@ -13,3 +13,6 @@ tests/fixtures/*.pptx
 tests/fixtures/*.potx
 # Exception: content-id-sample.pptx is the committed stable fixture for ContentIdentity.Tests
 !tests/fixtures/content-id-sample.pptx
+# Exception: crop-sample.pptx is the committed stable fixture for CropContentIdentity.Tests
+!tests/fixtures/crop-sample.pptx
+.superpowers/

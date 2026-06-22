@@ -26,7 +26,10 @@ param(
     [string]$OutputPath,
 
     [Parameter(Mandatory = $false)]
-    [string]$MagickPath = 'magick'
+    [string]$MagickPath = 'magick',
+
+    [Parameter(Mandatory = $false)]
+    [switch]$WithCrops
 )
 
 Set-StrictMode -Version Latest
@@ -56,6 +59,16 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $tempPng1)) {
 & $MagickPath -size 2000x2000 'gradient:orange-firebrick' $tempPng2
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $tempPng2)) {
     throw "ImageMagick failed to create the second sample PNG (exit $LASTEXITCODE)."
+}
+
+# A third image is used exclusively by the -WithCrops shapes (distinct color gradient so
+# the normal + stretch srcRect crops materialize as separate files).
+$tempPng3 = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), ("popt-sample-c-" + [guid]::NewGuid().ToString('N') + ".png"))
+if ($WithCrops) {
+    & $MagickPath -size 2000x2000 'gradient:lime-teal' $tempPng3
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $tempPng3)) {
+        throw "ImageMagick failed to create the crop sample PNG (exit $LASTEXITCODE)."
+    }
 }
 
 try {
@@ -257,7 +270,148 @@ try {
 
     [void]$slideCsd.SpTree.Append((New-PictureShape -ShapeId 2 -ShapeName 'Picture 1' -EmbedRelId $imgRelId1 -OffsetXEmu 914400))
     [void]$slideCsd.SpTree.Append((New-PictureShape -ShapeId 3 -ShapeName 'Picture 2' -EmbedRelId $imgRelId2 -OffsetXEmu 3657600))
+
+    if ($WithCrops) {
+        # Add image parts for the crop shapes. One part is shared by all four crop shapes
+        # to exercise the shared-image path; offset positions keep shapes non-overlapping.
+        $imgRelIdCrop = Add-ImagePartFromFile -SlidePart $slidePart -RelId 'rIdImgCrop' -PngPath $tempPng3
+
+        # Helper: builds a picture shape with a:srcRect and optional negative fillRect.
+        function New-PictureShapeWithCrop {
+            param(
+                [int]$ShapeId,
+                [string]$ShapeName,
+                [string]$EmbedRelId,
+                [long]$OffsetXEmu,
+                [long]$OffsetYEmu,
+                # a:srcRect offsets in 1000ths-of-a-percent (e.g. 10000 = 10%)
+                [int]$SrcLeft,
+                [int]$SrcTop,
+                [int]$SrcRight,
+                [int]$SrcBottom,
+                # optional negative a:fillRect left (for stretch crop)
+                [Nullable[int]]$FillLeft = $null
+            )
+            $pic = [DocumentFormat.OpenXml.Presentation.Picture]::new()
+            $nvPicPr = [DocumentFormat.OpenXml.Presentation.NonVisualPictureProperties]::new()
+            $picCnvP = [DocumentFormat.OpenXml.Presentation.NonVisualDrawingProperties]::new()
+            $picCnvP.Id = [System.UInt32]$ShapeId; $picCnvP.Name = $ShapeName
+            [void]$nvPicPr.Append($picCnvP)
+            [void]$nvPicPr.Append([DocumentFormat.OpenXml.Presentation.NonVisualPictureDrawingProperties]::new())
+            [void]$nvPicPr.Append([DocumentFormat.OpenXml.Presentation.ApplicationNonVisualDrawingProperties]::new())
+            [void]$pic.Append($nvPicPr)
+
+            $blipFill = [DocumentFormat.OpenXml.Presentation.BlipFill]::new()
+            $blip = [DocumentFormat.OpenXml.Drawing.Blip]::new()
+            $blip.Embed = $EmbedRelId
+            [void]$blipFill.Append($blip)
+
+            # a:srcRect must appear BEFORE a:stretch per the OOXML spec.
+            $srcRect = [DocumentFormat.OpenXml.Drawing.SourceRectangle]::new()
+            $srcRect.Left   = [DocumentFormat.OpenXml.Int32Value]::new($SrcLeft)
+            $srcRect.Top    = [DocumentFormat.OpenXml.Int32Value]::new($SrcTop)
+            $srcRect.Right  = [DocumentFormat.OpenXml.Int32Value]::new($SrcRight)
+            $srcRect.Bottom = [DocumentFormat.OpenXml.Int32Value]::new($SrcBottom)
+            [void]$blipFill.Append($srcRect)
+
+            $stretch = [DocumentFormat.OpenXml.Drawing.Stretch]::new()
+            $fillRect = [DocumentFormat.OpenXml.Drawing.FillRectangle]::new()
+            if ($null -ne $FillLeft) {
+                $fillRect.Left = [DocumentFormat.OpenXml.Int32Value]::new($FillLeft)
+            }
+            [void]$stretch.Append($fillRect)
+            [void]$blipFill.Append($stretch)
+            [void]$pic.Append($blipFill)
+
+            $spPr = [DocumentFormat.OpenXml.Presentation.ShapeProperties]::new()
+            $xfrm = [DocumentFormat.OpenXml.Drawing.Transform2D]::new()
+            $off = [DocumentFormat.OpenXml.Drawing.Offset]::new()
+            $off.X = [System.Int64]$OffsetXEmu; $off.Y = [System.Int64]$OffsetYEmu
+            $ext = [DocumentFormat.OpenXml.Drawing.Extents]::new()
+            $ext.Cx = [System.Int64]1828800; $ext.Cy = [System.Int64]1828800
+            [void]$xfrm.Append($off); [void]$xfrm.Append($ext)
+            [void]$spPr.Append($xfrm)
+            $presetGeom = [DocumentFormat.OpenXml.Drawing.PresetGeometry]::new()
+            $presetGeom.Preset = [DocumentFormat.OpenXml.Drawing.ShapeTypeValues]::Rectangle
+            [void]$presetGeom.Append([DocumentFormat.OpenXml.Drawing.AdjustValueList]::new())
+            [void]$spPr.Append($presetGeom)
+            [void]$pic.Append($spPr)
+            return , $pic
+        }
+
+        # Shape A: meaningful a:srcRect -> normal materialized crop.
+        [void]$slideCsd.SpTree.Append((New-PictureShapeWithCrop `
+            -ShapeId 4 -ShapeName 'Crop Normal' -EmbedRelId $imgRelIdCrop `
+            -OffsetXEmu 914400 -OffsetYEmu 3200000 `
+            -SrcLeft 10000 -SrcTop 10000 -SrcRight 10000 -SrcBottom 10000 `
+        ))
+
+        # Shape B: full-image a:srcRect (l=0 t=0 r=0 b=0) -> no-op, srcRect removed, no new file.
+        [void]$slideCsd.SpTree.Append((New-PictureShapeWithCrop `
+            -ShapeId 5 -ShapeName 'Crop NoOp' -EmbedRelId $imgRelIdCrop `
+            -OffsetXEmu 2743200 -OffsetYEmu 3200000 `
+            -SrcLeft 0 -SrcTop 0 -SrcRight 0 -SrcBottom 0 `
+        ))
+
+        # Shape C: negative fillRect left + meaningful a:srcRect -> stretch crop.
+        [void]$slideCsd.SpTree.Append((New-PictureShapeWithCrop `
+            -ShapeId 6 -ShapeName 'Crop Stretch' -EmbedRelId $imgRelIdCrop `
+            -OffsetXEmu 4572000 -OffsetYEmu 3200000 `
+            -SrcLeft 15000 -SrcTop 5000 -SrcRight 15000 -SrcBottom 5000 `
+            -FillLeft (-20000) `
+        ))
+    }
+
     $slidePart.Slide = $slide
+
+    # ---- WithCrops: add a picture with a:srcRect to the slide master ----
+    if ($WithCrops) {
+        # Add the crop image as a part of the master so the master/layout crop path is exercised.
+        $masterImgPart = $masterPart.AddNewPart[DocumentFormat.OpenXml.Packaging.ImagePart]('image/png', 'rIdMasterImg1')
+        $masterImgStream = [System.IO.File]::OpenRead($tempPng3)
+        try { $masterImgPart.FeedData($masterImgStream) } finally { $masterImgStream.Dispose() }
+        $masterImgRelId = $masterPart.GetIdOfPart($masterImgPart)
+
+        $masterPic = [DocumentFormat.OpenXml.Presentation.Picture]::new()
+        $mNvPicPr = [DocumentFormat.OpenXml.Presentation.NonVisualPictureProperties]::new()
+        $mCnvP = [DocumentFormat.OpenXml.Presentation.NonVisualDrawingProperties]::new()
+        $mCnvP.Id = [System.UInt32]10; $mCnvP.Name = 'Master Crop Picture'
+        [void]$mNvPicPr.Append($mCnvP)
+        [void]$mNvPicPr.Append([DocumentFormat.OpenXml.Presentation.NonVisualPictureDrawingProperties]::new())
+        [void]$mNvPicPr.Append([DocumentFormat.OpenXml.Presentation.ApplicationNonVisualDrawingProperties]::new())
+        [void]$masterPic.Append($mNvPicPr)
+
+        $mBlipFill = [DocumentFormat.OpenXml.Presentation.BlipFill]::new()
+        $mBlip = [DocumentFormat.OpenXml.Drawing.Blip]::new()
+        $mBlip.Embed = $masterImgRelId
+        [void]$mBlipFill.Append($mBlip)
+
+        $mSrcRect = [DocumentFormat.OpenXml.Drawing.SourceRectangle]::new()
+        $mSrcRect.Left   = [DocumentFormat.OpenXml.Int32Value]::new(12000)
+        $mSrcRect.Top    = [DocumentFormat.OpenXml.Int32Value]::new(12000)
+        $mSrcRect.Right  = [DocumentFormat.OpenXml.Int32Value]::new(12000)
+        $mSrcRect.Bottom = [DocumentFormat.OpenXml.Int32Value]::new(12000)
+        [void]$mBlipFill.Append($mSrcRect)
+
+        $mStretch = [DocumentFormat.OpenXml.Drawing.Stretch]::new()
+        [void]$mStretch.Append([DocumentFormat.OpenXml.Drawing.FillRectangle]::new())
+        [void]$mBlipFill.Append($mStretch)
+        [void]$masterPic.Append($mBlipFill)
+
+        $mSpPr = [DocumentFormat.OpenXml.Presentation.ShapeProperties]::new()
+        $mXfrm = [DocumentFormat.OpenXml.Drawing.Transform2D]::new()
+        $mOff = [DocumentFormat.OpenXml.Drawing.Offset]::new(); $mOff.X = [System.Int64]914400; $mOff.Y = [System.Int64]914400
+        $mExt = [DocumentFormat.OpenXml.Drawing.Extents]::new(); $mExt.Cx = [System.Int64]1828800; $mExt.Cy = [System.Int64]1828800
+        [void]$mXfrm.Append($mOff); [void]$mXfrm.Append($mExt)
+        [void]$mSpPr.Append($mXfrm)
+        $mPresetGeom = [DocumentFormat.OpenXml.Drawing.PresetGeometry]::new()
+        $mPresetGeom.Preset = [DocumentFormat.OpenXml.Drawing.ShapeTypeValues]::Rectangle
+        [void]$mPresetGeom.Append([DocumentFormat.OpenXml.Drawing.AdjustValueList]::new())
+        [void]$mSpPr.Append($mPresetGeom)
+        [void]$masterPic.Append($mSpPr)
+
+        [void]$smCsd.SpTree.Append($masterPic)
+    }
 
     # ---- Slide id list and slide size ----
     $sldIdList = [DocumentFormat.OpenXml.Presentation.SlideIdList]::new()
@@ -293,6 +447,7 @@ try {
 finally {
     if (Test-Path -LiteralPath $tempPng1) { Remove-Item -LiteralPath $tempPng1 -Force -ErrorAction SilentlyContinue }
     if (Test-Path -LiteralPath $tempPng2) { Remove-Item -LiteralPath $tempPng2 -Force -ErrorAction SilentlyContinue }
+    if ($tempPng3 -and (Test-Path -LiteralPath $tempPng3)) { Remove-Item -LiteralPath $tempPng3 -Force -ErrorAction SilentlyContinue }
 }
 
 if (-not (Test-Path -LiteralPath $OutputPath)) {
