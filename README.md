@@ -23,6 +23,7 @@ A cross-platform PowerShell script that intelligently optimizes PowerPoint prese
   - [Usage](#usage)
     - [Basic Examples](#basic-examples)
     - [Batch Processing](#batch-processing)
+    - [Interactive mode](#interactive-mode)
     - [Parameters Reference](#parameters-reference)
   - [How It Works](#how-it-works)
     - [Display Size vs Physical Size](#display-size-vs-physical-size)
@@ -279,6 +280,37 @@ Total savings:
   Saved: 196.56 MB (80.1%)
 ```
 
+### Interactive mode
+
+`-Interactive` launches a guided wizard for a single file. Use it when you want to inspect what the script would do before committing to a run, or when you want to tune options without constructing a command line by hand.
+
+```powershell
+.\Optimize-PptImages.ps1 -InputPath "deck.pptx" -Interactive
+```
+
+`-Interactive` cannot be combined with pipeline input or a batch input list. Attempting that combination raises an error.
+
+**What happens:**
+
+1. The script scans the file (read-only, no output written) and prints a findings summary split into two blocks: "Slides" and "Masters & layouts". Each block shows the usage and unique media counts, total media size, format breakdown, resize candidate count, PNG-to-JPEG conversion candidate count, and the top 5 oversized images by oversizing ratio. If more than 5 resize candidates exist, a "+N more" line follows the top-5 list. Source dimensions and opacity are resolved in parallel.
+
+2. You answer a short sequence of questions:
+   - **Operations:** yes/no for each of: optimize slides (default ON), optimize masters/layouts, apply crops on slides, apply crops on masters/layouts, remove unused layouts/masters (all default OFF).
+   - **Headroom factor:** choose a labeled preset (Smallest file 1.5, Balanced 2.0, Print/HiDPI safe 3.0) or enter a custom value. Default is 2.0.
+   - **JPEG quality:** choose a labeled preset (Smaller 80, Balanced 90, High fidelity 95) or enter a custom value. Default is 95.
+   - **Output path:** press Enter to accept the derived default, or type a custom path.
+   - **Advanced options (opt-in):** if you answer yes, you can set transparency threshold, minimum savings percent, and slide include/exclude lists.
+
+   Any flags you pass alongside `-Interactive` pre-fill the matching defaults. For example, passing `-CropSlides` makes "Apply crops on slides?" default to YES.
+
+3. The wizard displays the equivalent command line and offers four actions:
+   - **[R]un now** -- executes the operation immediately, reusing the scan already performed (no second extraction or scan).
+   - **[C]opy & exit** -- prints the equivalent command line and exits without writing any files.
+   - **[E]dit an answer** -- returns to a section menu (Operations, Headroom/Quality, Output path, Advanced) so you can revise a choice.
+   - **[Q]uit** -- exits without writing any files.
+
+---
+
 ### Parameters Reference
 
 | Parameter | Type | Default | Description |
@@ -301,6 +333,7 @@ Total savings:
 | `ExcludeSlides` | Int[] | *None* | Skip these slide numbers |
 | `CsvReportPath` | String | `<o>.opt-report.csv` | Path for CSV report file |
 | `PassThru` | Switch | `$false` | Return result object(s) to pipeline |
+| `Interactive` | Switch | `$false` | Launch an interactive wizard to review findings and configure a run for a single file. Cannot be combined with pipeline or batch input. |
 
 **Note:** When using `-IncludeSlides` or `-ExcludeSlides`, all slides are still analyzed for correct shared image sizing and Morph detection--only the modification is filtered.
 
