@@ -31,15 +31,23 @@
         $optimizedCount = 0
         $skippedCount = 0
         
-        # Process groups in slide order (by minimum slide number of usages)
-        $sortedGroups = $imageGroups.Values | Sort-Object { 
-            $slideUsages = $_.Usages | Where-Object { $_.ContextType -eq [ContextType]::Slide }
-            if ($slideUsages) {
-                ($slideUsages | Measure-Object -Property SlideNumber -Minimum).Minimum
-            } else {
-                9999  # No slide usages (master/layout only), sort to end
+        # Process groups in slide order (by minimum slide number of usages),
+        # then by media filename as a tiebreaker for deterministic output.
+        $sortedGroups = $imageGroups.Values | Sort-Object @(
+            @{
+                Expression = {
+                    $slideUsages = $_.Usages | Where-Object { $_.ContextType -eq [ContextType]::Slide }
+                    if ($slideUsages) {
+                        ($slideUsages | Measure-Object -Property SlideNumber -Minimum).Minimum
+                    } else {
+                        9999  # No slide usages (master/layout only), sort to end
+                    }
+                }
+            },
+            @{
+                Expression = { [System.IO.Path]::GetFileName($_.Usages[0].ImagePhysicalPath) }
             }
-        }
+        )
         
         # Determine if slide filters are active (used for scoping)
         $slideFiltersActive = ($IncludeSlides -and $IncludeSlides.Count -gt 0) -or ($ExcludeSlides -and $ExcludeSlides.Count -gt 0)

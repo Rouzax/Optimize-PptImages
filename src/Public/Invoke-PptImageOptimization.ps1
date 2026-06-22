@@ -226,14 +226,10 @@ param(
         }
     }
     
-    # Exit with appropriate code
-    # 0 = Success with changes
-    # 1 = Error occurred
-    # 2 = Success but no changes needed
-    if ($Host.Name -ne 'ConsoleHost' -or $script:BatchMode) {
-        # Don't exit in ISE or batch mode - let caller handle
-    } else {
-        exit $finalExitCode
-    }
+    # Store the final exit code so the script wrapper can propagate it.
+    # Do not call exit here; calling exit inside a module function terminates
+    # the caller's runspace, which breaks in-process test harnesses like Pester.
+    # The thin Optimize-PptImages.ps1 wrapper reads this variable and calls exit.
+    $script:LastFinalExitCode = $finalExitCode
     }
 }

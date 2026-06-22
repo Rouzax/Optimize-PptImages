@@ -11,3 +11,5 @@ TODO.md
 # Test fixture decks (generated at test time or supplied locally; never commit binaries)
 tests/fixtures/*.pptx
 tests/fixtures/*.potx
+# Exception: content-id-sample.pptx is the committed stable fixture for ContentIdentity.Tests
+!tests/fixtures/content-id-sample.pptx

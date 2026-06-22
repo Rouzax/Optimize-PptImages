@@ -81,4 +81,10 @@ begin {
     $steppablePipeline.Begin($PSCmdlet)
 }
 process { $steppablePipeline.Process($_) }
-end { $steppablePipeline.End() }
+end {
+    $steppablePipeline.End()
+    # Propagate the exit code set by the module function.
+    # Exit codes: 0 = success with changes, 1 = error, 2 = success but no changes needed.
+    $exitCode = (Get-Module 'Optimize-PptImages').Invoke({ $script:LastFinalExitCode })
+    exit ($null -ne $exitCode ? [int]$exitCode : 0)
+}
