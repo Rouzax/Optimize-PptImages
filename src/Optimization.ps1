@@ -505,7 +505,7 @@
             $job.ScratchPath = $scratchPath
             $job.MagickArgs  = $magickArgs
             $job.Operation   = 'OptimizeJpeg'
-            $job.StatusName  = 'OptimizeJpeg'
+            $job.StatusName  = 'OptimizedJpeg'
             $job.BeforeSize  = $group.OriginalSizeBytes
             $job.NewExtension = ''
             return $job
@@ -617,7 +617,7 @@
             $job.ScratchPath  = $scratchPath
             $job.MagickArgs   = $magickArgs
             $job.Operation    = 'OptimizeJpeg'
-            $job.StatusName   = 'OptimizeJpeg'
+            $job.StatusName   = 'OptimizedJpeg'
             $job.BeforeSize   = $group.OriginalSizeBytes
             $job.NewExtension = ''
             return $job
@@ -667,7 +667,7 @@
                 $job.ScratchPath  = $scratchPath
                 $job.MagickArgs   = $magickArgs
                 $job.Operation    = 'OptimizePngAlpha'
-                $job.StatusName   = 'OptimizePngAlpha'
+                $job.StatusName   = 'OptimizedPngAlpha'
                 $job.BeforeSize   = $group.OriginalSizeBytes
                 $job.NewExtension = ''
                 return $job

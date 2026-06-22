@@ -41,6 +41,7 @@ Describe 'Get-OptimizationJob (pure build)' {
             $job = Get-OptimizationJob -group $g -maxDisplay @{ Width = 800; Height = 600 } -scratchDir '/tmp/scratch'
             $job | Should -Not -BeNullOrEmpty
             $job.Operation | Should -Be 'OptimizeJpeg'
+            $job.StatusName | Should -Be 'OptimizedJpeg'
             $job.MagickArgs[0] | Should -Be '/tmp/x/image1.jpeg'
             $job.MagickArgs[-1] | Should -Be $job.ScratchPath
         }
@@ -88,6 +89,7 @@ Describe 'Get-OptimizationJob (pure build)' {
             $g = New-Grp '/tmp/x/image3.png' 2000 2000 200 200 90000 0 -1
             $job = Get-OptimizationJob -group $g -maxDisplay @{ Width = 200; Height = 200 } -scratchDir '/tmp/scratch'
             $job.Operation | Should -Be 'ConvertPngToJpeg'
+            $job.StatusName | Should -Be 'ConvertedPngToJpeg'
             $job.NewExtension | Should -Be '.jpeg'
         }
     }
@@ -111,6 +113,7 @@ Describe 'Get-OptimizationJob (pure build)' {
             $g = New-Grp '/tmp/x/image4.png' 2000 2000 200 200 90000 40 -1
             $job = Get-OptimizationJob -group $g -maxDisplay @{ Width = 200; Height = 200 } -scratchDir '/tmp/scratch'
             $job.Operation | Should -Be 'OptimizePngAlpha'
+            $job.StatusName | Should -Be 'OptimizedPngAlpha'
             $job.NewExtension | Should -Be ''
         }
     }
