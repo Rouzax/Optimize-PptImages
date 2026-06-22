@@ -511,6 +511,77 @@
         return $job
     }
 
+    function Complete-CropJob {
+        param(
+            [CropJob]$job,
+            [string]$scratchPath,
+            [bool]$success,
+            [long]$afterSize,
+            [string]$tempDir
+        )
+
+        if (-not $success) {
+            $job.Usage.OptimizationStatus = 'Skipped_CropInvalidOrUnsafe'
+            $job.Usage.WhyNotOptimized    = 'Crop operation failed'
+            Write-Warning "Crop failed for '$($job.Usage.ShapeName)' on $($job.Usage.Location)"
+            return @{ Success = $false }
+        }
+
+        $u = $job.Usage
+
+        $out = New-UniqueMediaPath -basePath $u.ImagePhysicalPath -suffix '_cropped'
+        Move-Item -LiteralPath $scratchPath $out.Path -Force
+        $null = Update-BlipRelationship -usage $u -tempDir $tempDir -newMediaFileName $out.Name
+
+        # Remove srcRect (sibling of blip within blipFill)
+        $blipFill = $u.BlipElement.ParentNode
+        if ($blipFill) {
+            $srcRect = $blipFill.SelectSingleNode('a:srcRect', $script:NsMgr)
+            if ($srcRect) {
+                $null = $srcRect.ParentNode.RemoveChild($srcRect)
+            }
+
+            # Also reset fillRect if it has negative values (stretch crop)
+            # The crop has been materialized, so fillRect should be reset to no offset
+            $stretch = $blipFill.SelectSingleNode('a:stretch', $script:NsMgr)
+            if ($stretch) {
+                $fillRect = $stretch.SelectSingleNode('a:fillRect', $script:NsMgr)
+                if ($fillRect) {
+                    # Check if any attributes were negative (indicating crop)
+                    $hasNegative = $false
+                    foreach ($attr in @('l', 't', 'r', 'b')) {
+                        $val = $fillRect.GetAttribute($attr)
+                        if ($val -and [double]$val -lt 0) {
+                            $hasNegative = $true
+                            break
+                        }
+                    }
+
+                    if ($hasNegative) {
+                        # Remove all attributes to reset to default (no offset)
+                        $fillRect.RemoveAttribute('l')
+                        $fillRect.RemoveAttribute('t')
+                        $fillRect.RemoveAttribute('r')
+                        $fillRect.RemoveAttribute('b')
+                        Write-Verbose "    Reset fillRect attributes (crop materialized into image)"
+                    }
+                }
+            }
+        }
+
+        $u.HasSrcRect        = $false
+        $u.CropApplied       = $true
+        $u.AfterSizeBytes    = $afterSize
+        $u.OptimizedFile     = $out.Name
+        $u.ImagePhysicalPath = $out.Path
+
+        $beforeSize    = $job.BeforeSize
+        $savedPercent  = if ($beforeSize -gt 0) { (($beforeSize - $afterSize) / $beforeSize) * 100 } else { 0 }
+        Write-Host "   [CROP] Cropped '$($u.ShapeName)' on $($u.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
+
+        return @{ Success = $true }
+    }
+
     function Invoke-CropOperation {
         param(
             [ImageUsage]$usage,
