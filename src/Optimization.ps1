@@ -116,7 +116,12 @@
                     }
                 }
                 $firstUsage = $hasIncludedUsage | Select-Object -First 1
-                Write-Host "   [SKIP] Skipped optimization for '$($firstUsage.ShapeName)' on $($firstUsage.Location): $($skipReason.Reason)" -ForegroundColor Gray
+                $skipMsg = "   [SKIP] Skipped optimization for '$($firstUsage.ShapeName)' on $($firstUsage.Location): $($skipReason.Reason)"
+                if ($skipReason.ManualAction) {
+                    Write-Host $skipMsg -ForegroundColor Gray
+                } else {
+                    Write-Verbose $skipMsg
+                }
                 $skippedCount += $group.Usages.Count
                 $groupJobPairs.Add([PSCustomObject]@{ Group = $group; Job = $null; HasIncludedUsage = $hasIncludedUsage; Skipped = $true })
                 continue
@@ -788,7 +793,7 @@
                 'OptimizePngAlpha' { 'Optimized PNG with transparency' }
                 default            { 'Optimized' }
             }
-            Write-Host "   [OK] $okVerb for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
+            Write-Verbose "   [OK] $okVerb for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)"
         } else {
             # Convert operation: allocate a new media name, update rels, remove the original.
             $srcExtForMsg = [System.IO.Path]::GetExtension($group.PhysicalPath).ToLower()
@@ -809,7 +814,7 @@
             } else {
                 "Converted $srcExtForMsg to $($job.NewExtension)"
             }
-            Write-Host "   [CONV] $convVerb for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
+            Write-Verbose "   [CONV] $convVerb for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)"
         }
 
         return @{ Success = $true }
