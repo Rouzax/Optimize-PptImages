@@ -677,21 +677,24 @@
             # Enrich each unique media file with real source dimensions and opacity.
             # Runspaces only invoke magick and return raw strings; parsing is sequential.
             $magickExe = $script:MagickExe
-            $uniqueGroups = $scan.Usages | Group-Object -Property ImagePhysicalPath
-            $rawFacts = @($uniqueGroups.Name) | ForEach-Object -Parallel {
-                $path = $_
-                if (-not (Test-Path -LiteralPath $path)) {
-                    [PSCustomObject]@{ Path = $path; Raw = $null }
-                } else {
-                    $out = & $using:magickExe identify -format "%w %h %[opaque]" $path 2>&1
-                    if ($LASTEXITCODE -ne 0) {
+            $uniqueGroups = @($scan.Usages | Group-Object -Property ImagePhysicalPath)
+            $rawFacts = @()
+            if ($uniqueGroups.Count -gt 0) {
+                $rawFacts = @($uniqueGroups.Name) | ForEach-Object -Parallel {
+                    $path = $_
+                    if (-not (Test-Path -LiteralPath $path)) {
                         [PSCustomObject]@{ Path = $path; Raw = $null }
                     } else {
-                        if ($out -is [array]) { $out = $out[0] }
-                        [PSCustomObject]@{ Path = $path; Raw = "$out" }
+                        $out = & $using:magickExe identify -format "%w %h %[opaque]" $path 2>&1
+                        if ($LASTEXITCODE -ne 0) {
+                            [PSCustomObject]@{ Path = $path; Raw = $null }
+                        } else {
+                            if ($out -is [array]) { $out = $out[0] }
+                            [PSCustomObject]@{ Path = $path; Raw = "$out" }
+                        }
                     }
-                }
-            } -ThrottleLimit ([Environment]::ProcessorCount)
+                } -ThrottleLimit ([Environment]::ProcessorCount)
+            }
 
             $factsMap = @{}
             foreach ($rf in $rawFacts) {

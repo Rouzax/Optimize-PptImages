@@ -196,7 +196,7 @@ function Get-PptImageFindings {
         }
 
         function Invoke-OutputQuestion {
-            param($a, $d)
+            param($a)
             Write-Host ''
             $raw = (Read-WizardLine "Output path [Enter for default derived name]").Trim()
             $a.OutputPath = $raw
@@ -221,7 +221,7 @@ function Get-PptImageFindings {
 
         Invoke-OperationQuestions -a $answers -d $Defaults
         Invoke-TuningQuestions    -a $answers -d $Defaults
-        Invoke-OutputQuestion     -a $answers -d $Defaults
+        Invoke-OutputQuestion     -a $answers
         Invoke-AdvancedQuestions  -a $answers -d $Defaults
 
         while ($true) {
@@ -239,7 +239,7 @@ function Get-PptImageFindings {
                     switch ($sec) {
                         '1' { Invoke-OperationQuestions -a $answers -d $answers }
                         '2' { Invoke-TuningQuestions    -a $answers -d $answers }
-                        '3' { Invoke-OutputQuestion     -a $answers -d $answers }
+                        '3' { Invoke-OutputQuestion     -a $answers }
                         '4' { Invoke-AdvancedQuestions  -a $answers -d $answers }
                         default { Write-Host '  Enter 1-4.' -ForegroundColor DarkYellow }
                     }

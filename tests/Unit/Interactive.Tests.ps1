@@ -53,6 +53,18 @@ Describe 'Get-PptImageFindings' {
             $f.Slides.FormatBreakdown['jpg']    | Should -Be 1
         }
     }
+
+    It 'returns zero counts and empty TopOffenders for an empty usages list (no throw)' {
+        InModuleScope Optimize-PptImages {
+            $emptyList = [System.Collections.Generic.List[ImageUsage]]::new()
+            $f = Get-PptImageFindings -usages $emptyList
+            $f.Slides.UsageCount               | Should -Be 0
+            $f.Slides.UniqueCount              | Should -Be 0
+            $f.MastersLayouts.UsageCount       | Should -Be 0
+            $f.MastersLayouts.UniqueCount      | Should -Be 0
+            $f.Slides.TopOffenders.Count       | Should -Be 0
+        }
+    }
 }
 
 Describe 'Wizard prompt helpers' {

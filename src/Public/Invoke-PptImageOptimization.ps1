@@ -121,7 +121,6 @@ param(
         }
 
         $context = Get-PptImageScan -InputPath $InputPath -MagickPath $MagickPath
-        $handedOff = $false
         try {
             $defaults = [PSCustomObject]@{
                 OptimizeSlides               = $script:OptimizeSlides
@@ -163,11 +162,10 @@ param(
             if ($a.ExcludeSlides -and $a.ExcludeSlides.Count -gt 0) { $ExcludeSlides = $a.ExcludeSlides }
 
             Write-Host "`n[FILE] Processing file $($script:FileCount): $(Split-Path $InputPath -Leaf)" -ForegroundColor Cyan
-            $handedOff = $true
             $result = Invoke-PptOptimization -CurrentInputPath $InputPath -PreparedScan $context
             $script:BatchResults.Add($result)
         } finally {
-            if (-not $handedOff -and $context.TempDir -and (Test-Path -LiteralPath $context.TempDir)) {
+            if ($context.TempDir -and (Test-Path -LiteralPath $context.TempDir)) {
                 Remove-Item -LiteralPath $context.TempDir -Recurse -Force -ErrorAction SilentlyContinue
             }
         }
@@ -212,7 +210,7 @@ param(
         }
     } else {
         # Single file mode - only output result if -PassThru specified
-        if ($PassThru) {
+        if ($PassThru -and $script:BatchResults.Count -gt 0) {
             $result = $script:BatchResults[0]
             if ($result.ErrorType -ne 'Validation') {
                 $result
