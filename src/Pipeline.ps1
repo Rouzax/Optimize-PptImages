@@ -1,7 +1,10 @@
     #region Main Processing Function
 
     function Invoke-PptOptimization {
-        param([string]$CurrentInputPath)
+        param(
+            [string]$CurrentInputPath,
+            [object]$PreparedScan = $null
+        )
         
         $exitCode = 0
         
@@ -35,12 +38,17 @@
             
             Initialize-Namespaces
             
-            # Create temp directory
-            $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "ppt-optimize-$(New-Guid)"
-            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-            
-            # Normalize to full path (avoid 8.3 filename issues)
-            $tempDir = (Get-Item -LiteralPath $tempDir).FullName
+            # Temp directory: reuse the wizard's extraction when provided, else create one.
+            if ($PreparedScan) {
+                $tempDir = $PreparedScan.TempDir
+                $ownsTempDir = $false
+            } else {
+                $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "ppt-optimize-$(New-Guid)"
+                New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+                # Normalize to full path (avoid 8.3 filename issues)
+                $tempDir = (Get-Item -LiteralPath $tempDir).FullName
+                $ownsTempDir = $true
+            }
             
             try {
                 # Initialize temp output file tracking (for cleanup in finally)
@@ -48,14 +56,21 @@
                 $tempCsvPath = $null
                 $copyFailed = $true  # Assume failure until copy succeeds
                 
-                # Extract (use .NET ZipFile for PS 5.1 compatibility - Expand-Archive only accepts .zip extension)
-                Add-Type -Assembly 'System.IO.Compression.FileSystem' -ErrorAction SilentlyContinue
-                [System.IO.Compression.ZipFile]::ExtractToDirectory($script:InputFile, $tempDir)
-                
-                # Scan (canonical slide order, slide dimensions, image usages)
-                $scan = Get-PptImageScanData -tempDir $tempDir
-                $slides = $scan.Slides
-                $usages = $scan.Usages
+                if ($PreparedScan) {
+                    # Reuse the wizard's scan: package is already extracted and scanned.
+                    $slides = $PreparedScan.Slides
+                    $usages = $PreparedScan.Usages
+                    $script:SlideDimensions = $PreparedScan.SlideDimensions
+                } else {
+                    # Extract (use .NET ZipFile; Expand-Archive only accepts .zip extension)
+                    Add-Type -Assembly 'System.IO.Compression.FileSystem' -ErrorAction SilentlyContinue
+                    [System.IO.Compression.ZipFile]::ExtractToDirectory($script:InputFile, $tempDir)
+
+                    # Scan (canonical slide order, slide dimensions, image usages)
+                    $scan = Get-PptImageScanData -tempDir $tempDir
+                    $slides = $scan.Slides
+                    $usages = $scan.Usages
+                }
 
                 Write-Host "[STATS] Found $($usages.Count) image usages" -ForegroundColor Cyan
                 $uniqueImages = if ($usages.Count -gt 0) { 
@@ -291,8 +306,9 @@
                 }
                 
             } finally {
-                # Cleanup extraction temp directory (always)
-                if (Test-Path -LiteralPath $tempDir) {
+                # Cleanup extraction temp directory only when this function created it.
+                # With -PreparedScan the wizard owns and cleans the temp dir.
+                if ($ownsTempDir -and (Test-Path -LiteralPath $tempDir)) {
                     Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
                 }
                 

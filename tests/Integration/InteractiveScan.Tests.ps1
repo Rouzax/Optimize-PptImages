@@ -55,3 +55,47 @@ Describe 'Get-PptImageScan' {
         }
     }
 }
+
+Describe 'Invoke-PptOptimization -PreparedScan reuse' {
+    It 'optimizes using a handed-over scan without owning the temp dir' {
+        InModuleScope Optimize-PptImages -Parameters @{ deck = $script:deck } {
+            param($deck)
+            $script:OptimizeSlides = $true
+            $script:OptimizeMastersAndLayouts = $false
+            $script:CropSlides = $false
+            $script:CropMastersAndLayouts = $false
+            $script:CleanUnusedLayouts = $false
+            $script:ValidateOutput = $false
+
+            # Outer-scope variables that Initialize-Script and optimization functions
+            # read via dynamic scoping. Set defaults matching Invoke-PptImageOptimization.
+            $MagickPath = $null
+            $OutputPath = $null
+            $CsvReportPath = $null
+            $IncludeSlides = @()
+            $ExcludeSlides = @()
+            $HeadroomFactor = 2.0
+            $JpegQuality = 95
+            $TransparencyThresholdPercent = 0.1
+            $MinSavingsPercent = 0.0
+
+            $ctx = Get-PptImageScan -InputPath $deck -MagickPath $null
+            try {
+                $result = Invoke-PptOptimization -CurrentInputPath $deck -PreparedScan $ctx
+                $result.Success | Should -BeTrue
+                # Reuse contract: the function did not delete the wizard-owned temp dir.
+                (Test-Path -LiteralPath $ctx.TempDir) | Should -BeTrue
+            } finally {
+                if ($ctx.TempDir -and (Test-Path -LiteralPath $ctx.TempDir)) {
+                    Remove-Item -LiteralPath $ctx.TempDir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                if ($result -and $result.OutputPath -and (Test-Path -LiteralPath $result.OutputPath)) {
+                    Remove-Item -LiteralPath $result.OutputPath -Force -ErrorAction SilentlyContinue
+                }
+                if ($result -and $result.ReportPath -and (Test-Path -LiteralPath $result.ReportPath)) {
+                    Remove-Item -LiteralPath $result.ReportPath -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+    }
+}
