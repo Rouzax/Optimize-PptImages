@@ -45,7 +45,7 @@
                 }
             },
             @{
-                Expression = { [System.IO.Path]::GetFileName($_.Usages[0].ImagePhysicalPath) }
+                Expression = { [System.IO.Path]::GetFileName($_.PhysicalPath) }
             }
         )
         

@@ -77,6 +77,10 @@ param(
         Set-StrictMode -Version Latest
         $ErrorActionPreference = 'Stop'
 
+        # Assume failure until the end block sets the real exit code.
+        # This prevents the wrapper from reading 0 if the function crashes before end{} completes.
+        $script:LastFinalExitCode = 1
+
         # Guard: -Interactive only works for a single file
         if ($Interactive -and $MyInvocation.ExpectingInput) {
             throw "Interactive mode supports a single file only. Run without pipeline/batch input, or drop -Interactive."

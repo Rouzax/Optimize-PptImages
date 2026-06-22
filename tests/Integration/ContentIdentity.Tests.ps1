@@ -3,7 +3,7 @@ BeforeAll {
     $script:deck = Join-Path $PSScriptRoot '../fixtures/content-id-sample.pptx'
     $script:baselineFile = Join-Path $PSScriptRoot '../fixtures/content-identity-baseline.json'
 
-    function script:Get-PackageManifest {
+    function Get-PackageManifest {
         param([string]$pptxPath)
         $work = Join-Path ([System.IO.Path]::GetTempPath()) "manifest-$([guid]::NewGuid())"
         New-Item -ItemType Directory -Path $work -Force | Out-Null
@@ -34,7 +34,7 @@ Describe 'Content identity of the optimize phase' {
         $out = Join-Path ([System.IO.Path]::GetTempPath()) "content-id-out-$([guid]::NewGuid()).pptx"
         try {
             Invoke-PptImageOptimization -InputPath $script:deck -OutputPath $out -All -PassThru | Out-Null
-            $manifest = script:Get-PackageManifest -pptxPath $out
+            $manifest = Get-PackageManifest -pptxPath $out
             $expected = Get-Content -LiteralPath $script:baselineFile -Raw | ConvertFrom-Json
             foreach ($key in $manifest.Keys) {
                 $manifest[$key] | Should -Be $expected.$key -Because "content of $key must match the sequential baseline"
