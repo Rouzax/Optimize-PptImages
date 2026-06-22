@@ -29,3 +29,29 @@ Describe 'Get-PptImageScanData' {
         }
     }
 }
+
+Describe 'Get-PptImageScan' {
+    It 'returns a live context with enriched source dimensions' {
+        InModuleScope Optimize-PptImages -Parameters @{ deck = $script:deck } {
+            param($deck)
+            $ctx = Get-PptImageScan -InputPath $deck -MagickPath $null
+            try {
+                $ctx.Findings.Slides.UsageCount | Should -BeGreaterThan 0
+                $ctx.TempDir | Should -Not -BeNullOrEmpty
+                (Test-Path -LiteralPath $ctx.TempDir) | Should -BeTrue   # not cleaned: caller owns it
+                ($ctx.Usages | Where-Object { $_.SourceWidthPx -gt 0 }).Count | Should -BeGreaterThan 0
+            } finally {
+                if ($ctx.TempDir -and (Test-Path -LiteralPath $ctx.TempDir)) {
+                    Remove-Item -LiteralPath $ctx.TempDir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+    }
+
+    It 'throws a clear error for a missing file' {
+        InModuleScope Optimize-PptImages {
+            { Get-PptImageScan -InputPath 'does-not-exist.pptx' -MagickPath $null } |
+                Should -Throw -ExpectedMessage '*not found*'
+        }
+    }
+}

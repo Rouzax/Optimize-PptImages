@@ -645,4 +645,81 @@
         }
     }
 
+    # Self-contained scan for the interactive wizard: validate, extract, scan, enrich
+    # source dimensions and opacity (in parallel), and compute findings. Returns a live
+    # context; the CALLER owns and must clean up context.TempDir. Writes no output files.
+    function Get-PptImageScan {
+        param(
+            [string]$InputPath,
+            [string]$MagickPath
+        )
+
+        if (-not (Test-Path -LiteralPath $InputPath)) {
+            throw "Input file not found: $InputPath"
+        }
+        $inputFull = (Resolve-Path -LiteralPath $InputPath).Path
+
+        Initialize-Namespaces
+        $script:MagickExe = Find-ImageMagick -ProvidedPath $MagickPath
+        if (-not $script:MagickExe) {
+            throw "ImageMagick not found. Install ImageMagick and ensure 'magick' is in PATH, or use -MagickPath."
+        }
+
+        $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "ppt-scan-$([guid]::NewGuid())"
+        New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+        $tempDir = (Get-Item -LiteralPath $tempDir).FullName
+        try {
+            Add-Type -Assembly 'System.IO.Compression.FileSystem' -ErrorAction SilentlyContinue
+            [System.IO.Compression.ZipFile]::ExtractToDirectory($inputFull, $tempDir)
+
+            $scan = Get-PptImageScanData -tempDir $tempDir
+
+            # Enrich each unique media file with real source dimensions and opacity.
+            # Runspaces only invoke magick and return raw strings; parsing is sequential.
+            $magickExe = $script:MagickExe
+            $uniqueGroups = $scan.Usages | Group-Object -Property ImagePhysicalPath
+            $rawFacts = @($uniqueGroups.Name) | ForEach-Object -Parallel {
+                $path = $_
+                if (-not (Test-Path -LiteralPath $path)) {
+                    [PSCustomObject]@{ Path = $path; Raw = $null }
+                } else {
+                    $out = & $using:magickExe identify -format "%w %h %[opaque]" $path 2>&1
+                    if ($LASTEXITCODE -ne 0) {
+                        [PSCustomObject]@{ Path = $path; Raw = $null }
+                    } else {
+                        if ($out -is [array]) { $out = $out[0] }
+                        [PSCustomObject]@{ Path = $path; Raw = "$out" }
+                    }
+                }
+            } -ThrottleLimit ([Environment]::ProcessorCount)
+
+            $factsMap = @{}
+            foreach ($rf in $rawFacts) {
+                if ($rf.Raw) { $factsMap[$rf.Path] = (ConvertFrom-MagickFacts -Raw $rf.Raw) }
+            }
+            foreach ($g in $uniqueGroups) {
+                if (-not $factsMap.ContainsKey($g.Name)) { continue }
+                $f = $factsMap[$g.Name]
+                foreach ($u in $g.Group) {
+                    $u.SourceWidthPx = $f.Width
+                    $u.SourceHeightPx = $f.Height
+                    $u.EffectiveTransparencyPercent = if ($f.IsOpaque) { 0 } else { 100 }
+                }
+            }
+
+            return [PSCustomObject]@{
+                Findings        = (Get-PptImageFindings -usages $scan.Usages)
+                Usages          = $scan.Usages
+                Slides          = $scan.Slides
+                SlideDimensions = $script:SlideDimensions
+                TempDir         = $tempDir
+            }
+        } catch {
+            if (Test-Path -LiteralPath $tempDir) {
+                Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            throw
+        }
+    }
+
     #endregion
