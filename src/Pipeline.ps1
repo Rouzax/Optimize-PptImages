@@ -70,6 +70,11 @@
                     $scan = Get-PptImageScanData -tempDir $tempDir
                     $slides = $scan.Slides
                     $usages = $scan.Usages
+
+                    # Front-load source dimensions in parallel (analysis); the heavy
+                    # optimize/convert work stays sequential. The -PreparedScan branch is
+                    # not touched: the wizard already enriched those usages.
+                    Update-SourceDimensionsParallel -usages $usages
                 }
 
                 Write-Host "[STATS] Found $($usages.Count) image usages" -ForegroundColor Cyan

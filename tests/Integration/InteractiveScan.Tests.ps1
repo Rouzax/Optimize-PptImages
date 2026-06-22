@@ -99,3 +99,40 @@ Describe 'Invoke-PptOptimization -PreparedScan reuse' {
         }
     }
 }
+
+Describe 'Non-interactive run front-loads source dimensions' {
+    It 'populates SourceWidthPx in the CSV report for a normal optimize run' {
+        InModuleScope Optimize-PptImages -Parameters @{ deck = $script:deck } {
+            param($deck)
+            $script:OptimizeSlides = $true
+            $script:OptimizeMastersAndLayouts = $false
+            $script:CropSlides = $false
+            $script:CropMastersAndLayouts = $false
+            $script:CleanUnusedLayouts = $false
+            $script:ValidateOutput = $false
+
+            # Outer-scope variables that Initialize-Script reads via dynamic scoping.
+            $MagickPath = $null
+            $OutputPath = $null
+            $CsvReportPath = $null
+            $IncludeSlides = @()
+            $ExcludeSlides = @()
+            $HeadroomFactor = 2.0
+            $JpegQuality = 95
+            $TransparencyThresholdPercent = 0.1
+            $MinSavingsPercent = 0.0
+
+            $result = Invoke-PptOptimization -CurrentInputPath $deck
+            try {
+                $result.Success | Should -BeTrue
+                $rows = Import-Csv -LiteralPath $result.ReportPath
+                # At least one image row reports a real source width (dims flowed through).
+                ($rows | Where-Object { [int]($_.SourceWidthPx) -gt 0 }).Count | Should -BeGreaterThan 0
+            } finally {
+                foreach ($p in @($result.OutputPath, $result.ReportPath)) {
+                    if ($p -and (Test-Path -LiteralPath $p)) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
+                }
+            }
+        }
+    }
+}
