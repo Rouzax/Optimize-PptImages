@@ -327,7 +327,6 @@
         )
 
         $magickExe = $script:MagickExe
-        $convertibleFormats = $script:Config.CONVERTIBLE_FORMATS
 
         # Group by physical path and filter to only files that need probing.
         # Transparency is probed for .png and non-BMP convertibles (.tif/.tiff/.gif) only.
