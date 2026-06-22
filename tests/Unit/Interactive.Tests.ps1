@@ -21,3 +21,36 @@ Describe 'ConvertFrom-MagickFacts' {
         }
     }
 }
+
+Describe 'Get-PptImageFindings' {
+    It 'splits slides vs masters and flags resize and conversion candidates' {
+        InModuleScope Optimize-PptImages {
+            function New-Usage {
+                param($Ctx, $Path, $Name, $SrcW, $SrcH, $DispW, $DispH, $Bytes, $Transparency = 0)
+                $u = [ImageUsage]::new()
+                $u.ContextType = $Ctx
+                $u.ImagePhysicalPath = $Path
+                $u.OriginalFileName = $Name
+                $u.SourceWidthPx = $SrcW; $u.SourceHeightPx = $SrcH
+                $u.DisplayWidthPx = $DispW; $u.DisplayHeightPx = $DispH
+                $u.BeforeSizeBytes = $Bytes
+                $u.EffectiveTransparencyPercent = $Transparency
+                return $u
+            }
+            $list = [System.Collections.Generic.List[ImageUsage]]::new()
+            $list.Add((New-Usage ([ContextType]::Slide)  'a/big.png'  'big.png'  8000 6000 1200 900 500000 0))
+            $list.Add((New-Usage ([ContextType]::Slide)  'a/ok.jpg'   'ok.jpg'   1000  800 1000 800 120000 0))
+            $list.Add((New-Usage ([ContextType]::Master) 'a/logo.png' 'logo.png' 2000 2000  200 200  90000 0))
+
+            $f = Get-PptImageFindings -usages $list
+            $f.Slides.UniqueCount               | Should -Be 2
+            $f.Slides.ResizeCandidateCount      | Should -Be 1
+            $f.Slides.ConversionCandidateCount  | Should -Be 1   # big.png opaque
+            $f.Slides.TopOffenders[0].Name      | Should -Be 'big.png'
+            $f.MastersLayouts.UniqueCount       | Should -Be 1
+            $f.MastersLayouts.ResizeCandidateCount | Should -Be 1
+            $f.Slides.FormatBreakdown['png']    | Should -Be 1
+            $f.Slides.FormatBreakdown['jpg']    | Should -Be 1
+        }
+    }
+}

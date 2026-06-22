@@ -10,6 +10,7 @@ Set-StrictMode -Version Latest
 . $PSScriptRoot/src/Initialization.ps1
 . $PSScriptRoot/src/Structure.ps1
 . $PSScriptRoot/src/Scanning.ps1
+. $PSScriptRoot/src/Interactive.ps1
 . $PSScriptRoot/src/Morph.ps1
 . $PSScriptRoot/src/Cropping.ps1
 . $PSScriptRoot/src/Optimization.ps1
