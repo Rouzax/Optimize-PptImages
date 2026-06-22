@@ -86,6 +86,27 @@ Describe 'Wizard prompt helpers' {
         }
     }
 
+    It 'parses a custom decimal under a comma-decimal culture' {
+        InModuleScope Optimize-PptImages {
+            $orig = [System.Threading.Thread]::CurrentThread.CurrentCulture
+            try {
+                [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::GetCultureInfo('nl-NL')
+                $script:queue = [System.Collections.Generic.Queue[string]]::new()
+                '4', '2.5' | ForEach-Object { $script:queue.Enqueue($_) }   # choose Custom(4), then 2.5
+                $script:WizardReadLine = { param($p) $script:queue.Dequeue() }
+                $presets = @(
+                    @{ Label = 'Smallest (1.5)'; Value = 1.5 },
+                    @{ Label = 'Balanced (2.0)'; Value = 2.0 },
+                    @{ Label = 'Print (3.0)';    Value = 3.0 }
+                )
+                Read-WizardPreset -Prompt 'Headroom' -Hint 'hint' -Presets $presets -Default 2.0 -Min 0.5 -Max 4.0 |
+                    Should -Be 2.5
+            } finally {
+                [System.Threading.Thread]::CurrentThread.CurrentCulture = $orig
+            }
+        }
+    }
+
     It 'returns default on empty yes/no input' {
         InModuleScope Optimize-PptImages {
             $script:queue = [System.Collections.Generic.Queue[string]]::new()

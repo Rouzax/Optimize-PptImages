@@ -115,7 +115,7 @@ function Get-PptImageFindings {
                 while ($true) {
                     $rawCustom = (Read-WizardLine "Custom value ($Min-$Max)").Trim()
                     $val = 0.0
-                    if ([double]::TryParse($rawCustom, [ref]$val) -and $val -ge $Min -and $val -le $Max) {
+                    if ([double]::TryParse($rawCustom, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$val) -and $val -ge $Min -and $val -le $Max) {
                         return $val
                     }
                     Write-Host "  Enter a number between $Min and $Max." -ForegroundColor DarkYellow
