@@ -121,7 +121,7 @@ Describe 'OptimizeJob class' {
     It 'constructs and holds the job fields' {
         InModuleScope Optimize-PptImages {
             $j = [OptimizeJob]::new()
-            $j.GroupKey = 'ppt/media/image1.png'
+            $j.Key = 'ppt/media/image1.png'
             $j.SourcePath = '/tmp/x/image1.png'
             $j.ScratchPath = '/tmp/scratch/abc.jpeg'
             $j.MagickArgs = @('/tmp/x/image1.png', '-strip', '/tmp/scratch/abc.jpeg')
@@ -334,7 +334,7 @@ Describe 'Complete-OptimizationJob' {
                 $u = [ImageUsage]::new(); $u.ImagePhysicalPath = $media; $u.OriginalFileName = 'image1.jpeg'
                 $g = [ImageGroup]::new(); $g.PhysicalPath = $media; $g.OriginalSizeBytes = (Get-Item $media).Length
                 $g.Usages.Add($u)
-                $job = [OptimizeJob]::new(); $job.GroupKey = $media; $job.NewExtension = ''
+                $job = [OptimizeJob]::new(); $job.Key = $media; $job.NewExtension = ''
                 $job.BeforeSize = $g.OriginalSizeBytes; $job.StatusName = 'OptimizeJpeg'
                 $r = Complete-OptimizationJob -job $job -group $g -scratchPath $scratch -success $true -afterSize 999999 -tempDir $dir
                 $r.Success | Should -BeFalse

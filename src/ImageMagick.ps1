@@ -66,6 +66,42 @@
         return $false
     }
 
+    # Generic parallel magick runner. Each job exposes .Key, .MagickArgs (with its scratch
+    # path as the output), and .ScratchPath. Runspaces invoke only magick and return raw
+    # results; nothing module-specific runs inside the runspace. Returns a hashtable keyed
+    # by Key. Progress is rendered from the parent via the streaming-downstream pattern.
+    function Invoke-MagickJobsParallel {
+        param(
+            [object[]]$jobs,
+            [string]$activity,
+            [int]$progressId
+        )
+
+        $resultMap = @{}
+        if (-not $jobs -or $jobs.Count -eq 0) { return $resultMap }
+
+        $magickExe = $script:MagickExe
+        $total = $jobs.Count
+        $rawResults = @($jobs) | ForEach-Object -Parallel {
+            $job = $_
+            & $using:magickExe @($job.MagickArgs) 2>&1 | Out-Null
+            $success   = ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $job.ScratchPath))
+            $afterSize = if ($success) { (Get-Item -LiteralPath $job.ScratchPath).Length } else { 0 }
+            [PSCustomObject]@{ Key = $job.Key; ScratchPath = $job.ScratchPath; Success = $success; AfterSize = $afterSize }
+        } -ThrottleLimit ([Environment]::ProcessorCount) | ForEach-Object -Begin { $count = 0 } -Process {
+            $count++
+            Write-Progress -Activity $activity -Status "Running: $count of $total" `
+                -PercentComplete (($count / [Math]::Max(1, $total)) * 100) -Id $progressId
+            $_
+        }
+        Write-Progress -Activity $activity -Completed -Id $progressId
+
+        foreach ($r in $rawResults) {
+            $resultMap[$r.Key] = @{ Success = $r.Success; AfterSize = $r.AfterSize; ScratchPath = $r.ScratchPath }
+        }
+        return $resultMap
+    }
+
     #endregion
 
     function Find-ImageMagick {

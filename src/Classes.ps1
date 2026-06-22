@@ -74,7 +74,7 @@
     }
 
     class OptimizeJob {
-        [string]$GroupKey
+        [string]$Key
         [string]$SourcePath
         [string]$ScratchPath
         [string[]]$MagickArgs

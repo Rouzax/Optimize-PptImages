@@ -161,10 +161,10 @@
         }
 
         # --- PARALLEL RUN ---
-        # Execute all magick jobs in parallel; results keyed by GroupKey.
+        # Execute all magick jobs in parallel; results keyed by Key.
         $jobResults = @{}
         if ($jobs.Count -gt 0) {
-            $jobResults = Invoke-OptimizeJobsParallel -jobs $jobs
+            $jobResults = Invoke-MagickJobsParallel -jobs $jobs -activity 'Optimizing images' -progressId 3
         }
 
         # --- COMMIT PASS (slide order) ---
@@ -178,7 +178,7 @@
             if ($pair.Skipped) { continue }
             if (-not $job) { continue }
 
-            $result = $jobResults[$job.GroupKey]
+            $result = $jobResults[$job.Key]
             $ran    = $result -ne $null
             $success   = $ran -and $result.Success
             $afterSize = if ($ran) { $result.AfterSize } else { 0 }
@@ -411,46 +411,6 @@
         }
     }
 
-    # Run each OptimizeJob's MagickArgs in parallel, returning a hashtable keyed by
-    # GroupKey -> PSCustomObject { Success; AfterSize; ScratchPath }.
-    # Runspaces only invoke magick and check the exit code; all module functions are
-    # inaccessible in the child runspaces. Progress is rendered via the streaming-
-    # downstream pattern (mirrors Update-OptimizeProbesParallel) on progress Id 3
-    # ("Optimizing images"). Set-StrictMode is NOT inherited by runspaces; the parallel
-    # block must not assume it.
-    function Invoke-OptimizeJobsParallel {
-        param(
-            [System.Collections.Generic.List[OptimizeJob]]$jobs
-        )
-
-        $magickExe = $script:MagickExe
-        $total = $jobs.Count
-
-        $rawResults = @($jobs) | ForEach-Object -Parallel {
-            $job = $_
-            & $using:magickExe @($job.MagickArgs) 2>&1 | Out-Null
-            $success   = ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $job.ScratchPath))
-            $afterSize = if ($success) { (Get-Item -LiteralPath $job.ScratchPath).Length } else { 0 }
-            [PSCustomObject]@{
-                GroupKey    = $job.GroupKey
-                ScratchPath = $job.ScratchPath
-                Success     = $success
-                AfterSize   = $afterSize
-            }
-        } -ThrottleLimit ([Environment]::ProcessorCount) | ForEach-Object -Begin { $count = 0 } -Process {
-            $count++
-            Write-Progress -Activity "Optimizing images" -Status "Running: $count of $total" `
-                -PercentComplete (($count / [Math]::Max(1, $total)) * 100) -Id 3
-            $_
-        }
-
-        $resultMap = @{}
-        foreach ($r in $rawResults) {
-            $resultMap[$r.GroupKey] = $r
-        }
-        return $resultMap
-    }
-
     function Get-ImageTransparency {
         param([string]$imagePath)
         
@@ -566,7 +526,7 @@
                 $scratchPath
             )
             $job = [OptimizeJob]::new()
-            $job.GroupKey    = $group.PhysicalPath
+            $job.Key    = $group.PhysicalPath
             $job.SourcePath  = $group.PhysicalPath
             $job.ScratchPath = $scratchPath
             $job.MagickArgs  = $magickArgs
@@ -614,7 +574,7 @@
             $magickArgs += $scratchPath
 
             $job = [OptimizeJob]::new()
-            $job.GroupKey     = $group.PhysicalPath
+            $job.Key     = $group.PhysicalPath
             $job.SourcePath   = $group.PhysicalPath
             $job.ScratchPath  = $scratchPath
             $job.MagickArgs   = $magickArgs
@@ -643,7 +603,7 @@
                         $scratchPath
                     )
                     $job = [OptimizeJob]::new()
-                    $job.GroupKey     = $group.PhysicalPath
+                    $job.Key     = $group.PhysicalPath
                     $job.SourcePath   = $group.PhysicalPath
                     $job.ScratchPath  = $scratchPath
                     $job.MagickArgs   = $magickArgs
@@ -683,7 +643,7 @@
                     $scratchPath
                 )
                 $job = [OptimizeJob]::new()
-                $job.GroupKey     = $group.PhysicalPath
+                $job.Key     = $group.PhysicalPath
                 $job.SourcePath   = $group.PhysicalPath
                 $job.ScratchPath  = $scratchPath
                 $job.MagickArgs   = $magickArgs
@@ -706,7 +666,7 @@
                     $scratchPath
                 )
                 $job = [OptimizeJob]::new()
-                $job.GroupKey     = $group.PhysicalPath
+                $job.Key     = $group.PhysicalPath
                 $job.SourcePath   = $group.PhysicalPath
                 $job.ScratchPath  = $scratchPath
                 $job.MagickArgs   = $magickArgs
