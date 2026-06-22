@@ -387,6 +387,130 @@
         return $true
     }
 
+    function Get-CropJob {
+        param(
+            [ImageUsage]$usage,
+            [string]$scratchDir
+        )
+
+        # SVG fallback: skip silently (PowerPoint regenerates these)
+        if ($usage.IsSvgFallbackUsage) {
+            $usage.OptimizationStatus = 'Skipped_SvgFallback'
+            $usage.WhyNotOptimized = 'PNG is auto-generated SVG fallback; PowerPoint regenerates'
+            $usage.ManualActionRequired = $false
+            return $null
+        }
+
+        # Animated GIF: cropping would break the animation
+        $ext = [System.IO.Path]::GetExtension($usage.ImagePhysicalPath).ToLower()
+        if ($ext -eq '.gif' -and (Test-IsAnimatedGif -ImagePath $usage.ImagePhysicalPath)) {
+            $usage.OptimizationStatus = 'Skipped_AnimatedGif'
+            $usage.WhyNotOptimized = 'Animated GIF - would break animation'
+            $usage.ManualActionRequired = $false
+            return $null
+        }
+
+        # Crop-flag check: is cropping enabled for this context?
+        if ($usage.ContextType -eq [ContextType]::Slide) {
+            if (-not $script:CropSlides) {
+                $usage.OptimizationStatus = 'Skipped_CropNotMaterialized'
+                $usage.WhyNotOptimized = 'Slide cropping disabled; enable -CropSlides'
+                $usage.ManualActionRequired = $true
+                $usage.ManualActionHint = 'Run with -CropSlides'
+                return $null
+            }
+        } elseif ($usage.ContextType -eq [ContextType]::Master -or $usage.ContextType -eq [ContextType]::Layout) {
+            if (-not $script:CropMastersAndLayouts) {
+                $usage.OptimizationStatus = 'Skipped_CropNotMaterialized'
+                $usage.WhyNotOptimized = 'Master/Layout cropping disabled; enable -CropMastersAndLayouts'
+                $usage.ManualActionRequired = $true
+                $usage.ManualActionHint = 'Run with -CropMastersAndLayouts'
+                return $null
+            }
+        }
+
+        # No-op crop: remove the srcRect from XML and mark as cleaned up, no crop job needed
+        if (Test-IsNoOpCrop -left $usage.SrcRectLeft -top $usage.SrcRectTop -right $usage.SrcRectRight -bottom $usage.SrcRectBottom) {
+            $blipFill = $usage.BlipElement.ParentNode
+            if ($blipFill) {
+                $srcRect = $blipFill.SelectSingleNode('a:srcRect', $script:NsMgr)
+                if ($srcRect) {
+                    $null = $srcRect.ParentNode.RemoveChild($srcRect)
+                }
+            }
+            $usage.HasSrcRect = $false
+            $usage.CropRemovedNoOp = $true
+            return $null
+        }
+
+        # Morph-pair conflict: meaningful crop on either side of a morph transition
+        if ($usage.MorphPair) {
+            $pair = $usage.MorphPair
+            $usageHasMeaningful = -not (Test-IsNoOpCrop -left $usage.SrcRectLeft -top $usage.SrcRectTop -right $usage.SrcRectRight -bottom $usage.SrcRectBottom)
+            $pairHasMeaningful = $pair.HasSrcRect -and -not (Test-IsNoOpCrop -left $pair.SrcRectLeft -top $pair.SrcRectTop -right $pair.SrcRectRight -bottom $pair.SrcRectBottom)
+
+            if ($usageHasMeaningful -or $pairHasMeaningful) {
+                $usage.OptimizationStatus = 'Skipped_MorphCropConflict'
+                $pair.OptimizationStatus = 'Skipped_MorphCropConflict'
+                $usage.WhyNotOptimized = 'Morph transition with crop conflict'
+                $pair.WhyNotOptimized = 'Morph transition with crop conflict'
+                $usage.ManualActionRequired = $true
+                $pair.ManualActionRequired = $true
+                $usage.ManualActionHint = 'Manually align crops or remove Morph'
+                $pair.ManualActionHint = 'Manually align crops or remove Morph'
+                return $null
+            }
+        }
+
+        # Validate crop geometry
+        if (-not (Test-CropValidity -usage $usage)) {
+            $usage.OptimizationStatus = 'Skipped_CropInvalidOrUnsafe'
+            $usage.WhyNotOptimized = 'Invalid crop geometry'
+            $usage.ManualActionRequired = $true
+            $usage.ManualActionHint = 'Review and fix crop values'
+            return $null
+        }
+
+        # Resolve source dimensions from cache; fall back to a live identify only if not cached
+        $srcWidth = $usage.SourceWidthPx
+        $srcHeight = $usage.SourceHeightPx
+        if ($srcWidth -eq 0) {
+            $dims = Get-ImageDimensions -ImagePath $usage.ImagePhysicalPath
+            $srcWidth = $dims.Width
+            $srcHeight = $dims.Height
+            $usage.SourceWidthPx = $srcWidth
+            $usage.SourceHeightPx = $srcHeight
+        }
+
+        # Compute crop geometry exactly as Invoke-CropOperation does
+        $leftPx   = [Math]::Round($srcWidth  * $usage.SrcRectLeft   / 100000.0)
+        $topPx    = [Math]::Round($srcHeight * $usage.SrcRectTop    / 100000.0)
+        $rightPx  = [Math]::Round($srcWidth  * $usage.SrcRectRight  / 100000.0)
+        $bottomPx = [Math]::Round($srcHeight * $usage.SrcRectBottom / 100000.0)
+
+        $cropWidth  = $srcWidth  - $leftPx - $rightPx
+        $cropHeight = $srcHeight - $topPx  - $bottomPx
+
+        # Clamp
+        $cropWidth  = [Math]::Max(1, [Math]::Min($cropWidth,  $srcWidth))
+        $cropHeight = [Math]::Max(1, [Math]::Min($cropHeight, $srcHeight))
+        $leftPx     = [Math]::Max(0, [Math]::Min($leftPx,  $srcWidth  - 1))
+        $topPx      = [Math]::Max(0, [Math]::Min($topPx,   $srcHeight - 1))
+
+        $cropGeometry = "${cropWidth}x${cropHeight}+${leftPx}+${topPx}"
+        $scratchPath  = Join-Path $scratchDir ("$([guid]::NewGuid())" + [System.IO.Path]::GetExtension($usage.ImagePhysicalPath))
+
+        $job = [CropJob]::new()
+        $job.Key         = "$($usage.PartPath)|$($usage.ShapeName)|$($usage.BlipRId)"
+        $job.SourcePath  = $usage.ImagePhysicalPath
+        $job.ScratchPath = $scratchPath
+        $job.MagickArgs  = @($usage.ImagePhysicalPath, '-crop', $cropGeometry, '+repage', $scratchPath)
+        $job.BeforeSize  = $usage.BeforeSizeBytes
+        $job.Usage       = $usage
+
+        return $job
+    }
+
     function Invoke-CropOperation {
         param(
             [ImageUsage]$usage,

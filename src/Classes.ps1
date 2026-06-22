@@ -84,4 +84,13 @@
         [string]$StatusName
     }
 
+    class CropJob {
+        [string]$Key
+        [string]$SourcePath
+        [string]$ScratchPath
+        [string[]]$MagickArgs
+        [long]$BeforeSize
+        [object]$Usage
+    }
+
     #endregion
