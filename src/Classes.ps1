@@ -73,4 +73,15 @@
         [bool]$IsMorphTransition
     }
 
+    class OptimizeJob {
+        [string]$GroupKey
+        [string]$SourcePath
+        [string]$ScratchPath
+        [string[]]$MagickArgs
+        [string]$Operation
+        [long]$BeforeSize
+        [string]$NewExtension
+        [string]$StatusName
+    }
+
     #endregion
