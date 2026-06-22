@@ -193,6 +193,15 @@
         $scratchDir = Join-Path $tempDir '.crop-scratch'
         New-Item -ItemType Directory -Path $scratchDir -Force | Out-Null
 
+        # --- BUILD PASS ---
+        # Iterate usages in the existing order. Silent slide-filter skips and the
+        # ShouldProcess gate are honored here. For each usage with HasSrcRect that is
+        # in scope, call Get-CropJob. Null results are tallied and messaged immediately.
+        # Non-null jobs are collected for the parallel run; each is paired with its
+        # usage so the commit pass can look up results by Key and iterate in usage order.
+        $jobs = [System.Collections.Generic.List[CropJob]]::new()
+        $usageJobPairs = [System.Collections.Generic.List[PSCustomObject]]::new()
+
         foreach ($usage in $usages) {
             if (-not $usage.HasSrcRect) { continue }
 
@@ -211,7 +220,7 @@
 
             # Now update progress (item is in scope)
             $currentItem++
-            Write-Progress -Activity "Processing crops" -Status "$currentItem of $totalItems" `
+            Write-Progress -Activity "Processing crops" -Status "Preparing: $currentItem of $totalItems" `
                 -PercentComplete (($currentItem / [Math]::Max(1, $totalItems)) * 100) -Id 2
 
             # Decide phase: Get-CropJob handles SVG/animated-GIF/flag/no-op/morph/validity decisions.
@@ -262,19 +271,36 @@
                 continue
             }
 
-            # Execute phase: run ImageMagick with the pre-computed args.
+            # ShouldProcess gate: only collect the job when the operation is confirmed.
             if ($PSCmdlet.ShouldProcess("$($usage.ShapeName) on $($usage.Location)", "Crop image")) {
-                & $script:MagickExe @($job.MagickArgs) 2>&1 | Out-Null
-                $success = ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $job.ScratchPath))
-                $afterSize = if ($success) { (Get-Item -LiteralPath $job.ScratchPath).Length } else { 0 }
+                $jobs.Add($job)
+                $usageJobPairs.Add([PSCustomObject]@{ Usage = $usage; Job = $job })
+            }
+        }
 
-                # Commit phase: move scratch file into place, update XML and rels.
-                $result = Complete-CropJob -job $job -scratchPath $job.ScratchPath -success $success -afterSize $afterSize -tempDir $tempDir
-                if ($result.Success) {
-                    $croppedCount++
-                } else {
-                    $skippedCount++
-                }
+        # --- PARALLEL RUN ---
+        # Execute all magick crop jobs in parallel; results keyed by Key.
+        $jobResults = @{}
+        if ($jobs.Count -gt 0) {
+            $jobResults = Invoke-MagickJobsParallel -jobs $jobs -activity 'Processing crops' -progressId 2
+        }
+
+        # --- COMMIT PASS ---
+        # Iterate usageJobPairs in the same order they were added (usage order).
+        # Look up each job's result, call Complete-CropJob, and tally.
+        # A missing result key is treated as success=$false.
+        foreach ($pair in $usageJobPairs) {
+            $job = $pair.Job
+            $result = $jobResults[$job.Key]
+            $ran       = $result -ne $null
+            $success   = $ran -and $result.Success
+            $afterSize = if ($ran) { $result.AfterSize } else { 0 }
+
+            $commitResult = Complete-CropJob -job $job -scratchPath $job.ScratchPath -success $success -afterSize $afterSize -tempDir $tempDir
+            if ($commitResult.Success) {
+                $croppedCount++
+            } else {
+                $skippedCount++
             }
         }
 
