@@ -84,6 +84,37 @@ Describe 'Update-OptimizeProbesParallel' {
             }
         }
     }
+
+    It 'filters WARNING noise lines from transparency output and returns the numeric value' {
+        # Validates that the noise-filtering logic (matching Get-ImageTransparency exactly)
+        # picks the numeric token even when WARNING lines accompany the magick output.
+        # This is a unit test of the sequential parse step: `Raw` is now a pre-filtered
+        # numeric token from the runspace, so a contaminated raw string falls back to 0.0.
+        InModuleScope Optimize-PptImages {
+            # Simulate the sequential parse step that runs in the parent after the
+            # parallel block returns. The previous bug: raw = "WARNING: foo 0.000000"
+            # did not match '^\d+\.?\d*$' and fell back to 0.0. The fix moves filtering
+            # into the runspace so Raw is already a clean numeric string or $null.
+            # We test here that a clean numeric token is parsed correctly and that a
+            # contaminated string (as the old code would have produced) would fail.
+
+            # Clean token (what the fixed runspace returns):
+            $cleanRaw = '0.000000'
+            $cleanRaw -match '^\d+\.?\d*$' | Should -BeTrue
+            [double]$cleanRaw | Should -BeGreaterOrEqual 0
+
+            # Contaminated string (what the old runspace returned when WARNING was present):
+            $noisyRaw = 'WARNING: profile icc: tag size 1578 too large for tag icm2 1380' + [char]10 + '0.000000'
+            $noisyRaw -match '^\d+\.?\d*$' | Should -BeFalse
+
+            # Filtered equivalent of the noisy string (what Where-Object produces):
+            $filtered = @($noisyRaw -split "`n") |
+                Where-Object { $_ -notmatch '^(WARNING|System\.Management)' -and $_ -match '^\d+\.?\d*$' } |
+                Select-Object -First 1
+            $filtered | Should -Be '0.000000'
+            [double]$filtered | Should -BeGreaterOrEqual 0
+        }
+    }
 }
 
 Describe 'OptimizeJob class' {

@@ -308,13 +308,13 @@
                 $ext  = $_.Ext
                 if (-not (Test-Path -LiteralPath $path)) {
                     [PSCustomObject]@{ Path = $path; Kind = 'none'; Raw = $null }
-                } elseif ($ext -in @('.png', '.bmp', '.tif', '.tiff', '.gif')) {
+                } elseif ($ext -eq '.png' -or $ext -in $using:convertibleFormats) {
                     $out = & $using:magickExe $path -alpha extract -format "%[fx:100*(1-mean)]" info: 2>&1
                     if ($LASTEXITCODE -ne 0) {
                         [PSCustomObject]@{ Path = $path; Kind = 'transparency'; Raw = $null }
                     } else {
-                        if ($out -is [array]) { $out = $out[0] }
-                        [PSCustomObject]@{ Path = $path; Kind = 'transparency'; Raw = "$out" }
+                        $token = @($out) | Where-Object { $_ -notmatch '^(WARNING|System\.Management)' -and $_ -match '^\d+\.?\d*$' } | Select-Object -First 1
+                        [PSCustomObject]@{ Path = $path; Kind = 'transparency'; Raw = $token }
                     }
                 } elseif ($ext -in @('.jpg', '.jpeg')) {
                     $out = & $using:magickExe identify -format "%Q" $path 2>&1
