@@ -125,4 +125,31 @@ function Get-PptImageFindings {
         }
     }
 
+    # Compose the equivalent CLI for the chosen answers. Operation switches only when
+    # enabled, core tuning always, secondary/advanced options only when non-default.
+    function Format-PptCommandLine {
+        param([string]$InputPath, [object]$Answers)
+
+        $parts = [System.Collections.Generic.List[string]]::new()
+        $parts.Add('.\Optimize-PptImages.ps1')
+        $parts.Add("-InputPath `"$InputPath`"")
+
+        if ($Answers.OptimizeSlides)            { $parts.Add('-OptimizeSlides') }
+        if ($Answers.OptimizeMastersAndLayouts) { $parts.Add('-OptimizeMastersAndLayouts') }
+        if ($Answers.CropSlides)                { $parts.Add('-CropSlides') }
+        if ($Answers.CropMastersAndLayouts)     { $parts.Add('-CropMastersAndLayouts') }
+        if ($Answers.CleanUnusedLayouts)        { $parts.Add('-CleanUnusedLayouts') }
+
+        $parts.Add("-HeadroomFactor $($Answers.HeadroomFactor)")
+        $parts.Add("-JpegQuality $($Answers.JpegQuality)")
+
+        if ($Answers.OutputPath) { $parts.Add("-OutputPath `"$($Answers.OutputPath)`"") }
+        if ($Answers.TransparencyThresholdPercent -ne 0.1) { $parts.Add("-TransparencyThresholdPercent $($Answers.TransparencyThresholdPercent)") }
+        if ($Answers.MinSavingsPercent -ne 0.0)            { $parts.Add("-MinSavingsPercent $($Answers.MinSavingsPercent)") }
+        if ($Answers.IncludeSlides -and $Answers.IncludeSlides.Count -gt 0) { $parts.Add("-IncludeSlides $($Answers.IncludeSlides -join ',')") }
+        if ($Answers.ExcludeSlides -and $Answers.ExcludeSlides.Count -gt 0) { $parts.Add("-ExcludeSlides $($Answers.ExcludeSlides -join ',')") }
+
+        return ($parts -join ' ')
+    }
+
 #endregion

@@ -116,3 +116,44 @@ Describe 'Wizard prompt helpers' {
         }
     }
 }
+
+Describe 'Format-PptCommandLine' {
+    It 'composes switches and tuning values from answers' {
+        InModuleScope Optimize-PptImages {
+            $answers = [PSCustomObject]@{
+                OptimizeSlides = $true; OptimizeMastersAndLayouts = $false
+                CropSlides = $true; CropMastersAndLayouts = $false; CleanUnusedLayouts = $false
+                HeadroomFactor = 2.0; JpegQuality = 90
+                OutputPath = ''
+                TransparencyThresholdPercent = 0.1; MinSavingsPercent = 0.0
+                IncludeSlides = @(); ExcludeSlides = @()
+            }
+            $line = Format-PptCommandLine -InputPath 'C:/decks/q3.pptx' -Answers $answers
+            $line | Should -BeLike '*-InputPath "C:/decks/q3.pptx"*'
+            $line | Should -BeLike '*-OptimizeSlides*'
+            $line | Should -BeLike '*-CropSlides*'
+            $line | Should -BeLike '*-HeadroomFactor 2*'
+            $line | Should -BeLike '*-JpegQuality 90*'
+            $line | Should -Not -BeLike '*-OptimizeMastersAndLayouts*'
+            $line | Should -Not -BeLike '*-MinSavingsPercent*'
+            $line | Should -Not -BeLike '*-IncludeSlides*'
+        }
+    }
+
+    It 'includes output path and slide filters when set' {
+        InModuleScope Optimize-PptImages {
+            $answers = [PSCustomObject]@{
+                OptimizeSlides = $true; OptimizeMastersAndLayouts = $false
+                CropSlides = $false; CropMastersAndLayouts = $false; CleanUnusedLayouts = $false
+                HeadroomFactor = 1.5; JpegQuality = 95
+                OutputPath = 'C:/out/small.pptx'
+                TransparencyThresholdPercent = 0.1; MinSavingsPercent = 5.0
+                IncludeSlides = @(1, 2, 5); ExcludeSlides = @()
+            }
+            $line = Format-PptCommandLine -InputPath 'in.pptx' -Answers $answers
+            $line | Should -BeLike '*-OutputPath "C:/out/small.pptx"*'
+            $line | Should -BeLike '*-MinSavingsPercent 5*'
+            $line | Should -BeLike '*-IncludeSlides 1,2,5*'
+        }
+    }
+}
