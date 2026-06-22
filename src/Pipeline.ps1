@@ -52,25 +52,11 @@
                 Add-Type -Assembly 'System.IO.Compression.FileSystem' -ErrorAction SilentlyContinue
                 [System.IO.Compression.ZipFile]::ExtractToDirectory($script:InputFile, $tempDir)
                 
-                # Get canonical slide order
-                $slides = Get-CanonicalSlideOrder -tempDir $tempDir
-                
-                if (-not $slides -or $slides.Count -eq 0) {
-                    Write-Warning "No slides found in presentation"
-                    $slides = [System.Collections.Generic.List[SlideInfo]]::new()
-                }
-                
-                # Get slide dimensions for background image sizing
-                $script:SlideDimensions = Get-SlideDimensions -tempDir $tempDir
-                Write-Verbose "Slide dimensions: $($script:SlideDimensions.WidthPx)x$($script:SlideDimensions.HeightPx)px"
-                
-                # Scan for image usages
-                $usages = Get-ImageUsages -tempDir $tempDir -slides $slides
-                
-                if (-not $usages) {
-                    $usages = [System.Collections.Generic.List[ImageUsage]]::new()
-                }
-                
+                # Scan (canonical slide order, slide dimensions, image usages)
+                $scan = Get-PptImageScanData -tempDir $tempDir
+                $slides = $scan.Slides
+                $usages = $scan.Usages
+
                 Write-Host "[STATS] Found $($usages.Count) image usages" -ForegroundColor Cyan
                 $uniqueImages = if ($usages.Count -gt 0) { 
                     ($usages | Select-Object -Property ImagePhysicalPath -Unique).Count 

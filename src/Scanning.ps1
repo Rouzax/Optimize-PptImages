@@ -619,4 +619,30 @@
         return 'Background/Fill'
     }
 
+    # Shared scan core: given an already-extracted package directory, build the
+    # canonical slide order, capture slide dimensions, and scan image usages.
+    # Caller owns the temp directory lifecycle and must have run Initialize-Namespaces.
+    function Get-PptImageScanData {
+        param([string]$tempDir)
+
+        $slides = Get-CanonicalSlideOrder -tempDir $tempDir
+        if (-not $slides -or $slides.Count -eq 0) {
+            Write-Warning "No slides found in presentation"
+            $slides = [System.Collections.Generic.List[SlideInfo]]::new()
+        }
+
+        $script:SlideDimensions = Get-SlideDimensions -tempDir $tempDir
+        Write-Verbose "Slide dimensions: $($script:SlideDimensions.WidthPx)x$($script:SlideDimensions.HeightPx)px"
+
+        $usages = Get-ImageUsages -tempDir $tempDir -slides $slides
+        if (-not $usages) {
+            $usages = [System.Collections.Generic.List[ImageUsage]]::new()
+        }
+
+        return [PSCustomObject]@{
+            Usages = $usages
+            Slides = $slides
+        }
+    }
+
     #endregion
