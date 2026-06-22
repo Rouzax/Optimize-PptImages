@@ -659,6 +659,13 @@
         $uniqueGroups = @($usages | Group-Object -Property ImagePhysicalPath)
         $rawFacts = @()
         if ($uniqueGroups.Count -gt 0) {
+            # The runspaces only invoke magick and return raw strings. ForEach-Object
+            # -Parallel streams each result back as it completes, so the downstream
+            # ForEach-Object (running in this parent runspace) counts completions and
+            # renders progress. No shared or thread-safe counter is needed: $count lives
+            # in the parent and is incremented single-threaded. Progress advances in
+            # completion order, not file order, but the count stays accurate.
+            $total = $uniqueGroups.Count
             $rawFacts = @($uniqueGroups.Name) | ForEach-Object -Parallel {
                 $path = $_
                 if (-not (Test-Path -LiteralPath $path)) {
@@ -672,7 +679,13 @@
                         [PSCustomObject]@{ Path = $path; Raw = "$out" }
                     }
                 }
-            } -ThrottleLimit ([Environment]::ProcessorCount)
+            } -ThrottleLimit ([Environment]::ProcessorCount) | ForEach-Object -Begin { $count = 0 } -Process {
+                $count++
+                Write-Progress -Activity "Probing image dimensions" -Status "$count of $total" `
+                    -PercentComplete (($count / $total) * 100) -Id 4
+                $_
+            }
+            Write-Progress -Activity "Probing image dimensions" -Completed -Id 4
         }
 
         $factsMap = @{}
