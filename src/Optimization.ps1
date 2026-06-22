@@ -79,30 +79,32 @@
         $scratchDir = Join-Path $tempDir '.opt-scratch'
         New-Item -ItemType Directory -Path $scratchDir -Force | Out-Null
 
-        foreach ($group in $sortedGroups) {
+        # --- BUILD PASS ---
+        # Iterate in-scope groups in slide order, computing jobs. Groups that are skipped
+        # (skip reason or null job) have their statuses set here. Non-null jobs are
+        # collected for the parallel run. An ordered list tracks each group alongside its
+        # job (or null) so the commit pass can iterate in the same order.
+        $jobs = [System.Collections.Generic.List[OptimizeJob]]::new()
+        $groupJobPairs = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+        foreach ($group in $inScopeGroups) {
             $mediaFile = Split-Path $group.PhysicalPath -Leaf
-            
-            # Check slide filter FIRST - skip groups where no usage is on an included slide
-            # When slide filters are active, also skip masters/layouts (they affect all slides)
+
+            # Slide-filter check (duplicates the $inScopeGroups pre-filter for the
+            # $hasIncludedUsage reference needed by skip logging).
             $hasIncludedUsage = $group.Usages | Where-Object {
                 if ($slideFiltersActive) {
-                    # Only include slide usages that pass the filter
                     $_.ContextType -eq [ContextType]::Slide -and (Test-SlideIncluded -SlideNumber $_.SlideNumber)
                 } else {
-                    # No filter - include all (slides pass through, masters/layouts always included)
                     $_.ContextType -ne [ContextType]::Slide -or (Test-SlideIncluded -SlideNumber $_.SlideNumber)
                 }
             }
-            if (-not $hasIncludedUsage) {
-                continue
-            }
-            
-            # Now update progress (group is in scope)
+
             $currentGroup++
-            Write-Progress -Activity "Optimizing images" -Status "$mediaFile ($currentGroup of $totalGroups)" `
+            Write-Progress -Activity "Optimizing images" -Status "Preparing: $mediaFile ($currentGroup of $totalGroups)" `
                 -PercentComplete (($currentGroup / [Math]::Max(1, $totalGroups)) * 100) -Id 3
-            
-            # Check if optimization forbidden (only after confirming group is in scope)
+
+            # Check if optimization is forbidden for this group.
             $skipReason = Get-OptimizationSkipReason -group $group
             if ($skipReason) {
                 foreach ($usage in $group.Usages) {
@@ -113,38 +115,59 @@
                         $usage.ManualActionHint = $skipReason.Hint
                     }
                 }
-                # Log first included usage as representative
                 $firstUsage = $hasIncludedUsage | Select-Object -First 1
                 Write-Host "   [SKIP] Skipped optimization for '$($firstUsage.ShapeName)' on $($firstUsage.Location): $($skipReason.Reason)" -ForegroundColor Gray
                 $skippedCount += $group.Usages.Count
+                $groupJobPairs.Add([PSCustomObject]@{ Group = $group; Job = $null; HasIncludedUsage = $hasIncludedUsage; Skipped = $true })
                 continue
             }
-            
-            # Calculate target dimensions
+
+            # Calculate target dimensions.
             $maxDisplay = @{
-                Width = ($group.Usages | Measure-Object -Property DisplayWidthPx -Maximum).Maximum
+                Width  = ($group.Usages | Measure-Object -Property DisplayWidthPx -Maximum).Maximum
                 Height = ($group.Usages | Measure-Object -Property DisplayHeightPx -Maximum).Maximum
             }
-            $firstUsage = $hasIncludedUsage | Select-Object -First 1
 
             if ($PSCmdlet.ShouldProcess($mediaFile, "Optimize image")) {
                 # Probe values were already cached by Update-OptimizeProbesParallel above.
-                # Build a job or set skip statuses.
+                # Build a job or set skip statuses (null job means already-optimal/no-change).
                 $job = Get-OptimizationJob -group $group -maxDisplay $maxDisplay -scratchDir $scratchDir
                 if (-not $job) {
                     if ($group.Usages[0].OptimizationStatus -match '^(Skipped|NoChange)') { $skippedCount += $group.Usages.Count }
+                    $groupJobPairs.Add([PSCustomObject]@{ Group = $group; Job = $null; HasIncludedUsage = $hasIncludedUsage; Skipped = $false })
                     continue
                 }
 
-                # Phase 3 (sequential here): run magick to the scratch file.
-                & $script:MagickExe @($job.MagickArgs) 2>&1 | Out-Null
-                $success = ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $job.ScratchPath))
-                $afterSize = if ($success) { (Get-Item -LiteralPath $job.ScratchPath).Length } else { 0 }
-
-                # Phase 4: commit (sequential, slide order).
-                $result = Complete-OptimizationJob -job $job -group $group -scratchPath $job.ScratchPath -success $success -afterSize $afterSize -tempDir $tempDir
-                if ($result.Success) { $optimizedCount++ } else { $skippedCount += $group.Usages.Count }
+                $jobs.Add($job)
+                $groupJobPairs.Add([PSCustomObject]@{ Group = $group; Job = $job; HasIncludedUsage = $hasIncludedUsage; Skipped = $false })
             }
+        }
+
+        # --- PARALLEL RUN ---
+        # Execute all magick jobs in parallel; results keyed by GroupKey.
+        $jobResults = @{}
+        if ($jobs.Count -gt 0) {
+            $jobResults = Invoke-OptimizeJobsParallel -jobs $jobs
+        }
+
+        # --- COMMIT PASS (slide order) ---
+        # Iterate groupJobPairs in the same order they were added (slide order).
+        # Groups that had a job look up their result and call Complete-OptimizationJob.
+        # Groups that were already tallied (skipped in build pass) are skipped here.
+        foreach ($pair in $groupJobPairs) {
+            $group = $pair.Group
+            $job   = $pair.Job
+
+            if ($pair.Skipped) { continue }
+            if (-not $job) { continue }
+
+            $result = $jobResults[$job.GroupKey]
+            $ran    = $result -ne $null
+            $success   = $ran -and $result.Success
+            $afterSize = if ($ran) { $result.AfterSize } else { 0 }
+
+            $commitResult = Complete-OptimizationJob -job $job -group $group -scratchPath $job.ScratchPath -success $success -afterSize $afterSize -tempDir $tempDir
+            if ($commitResult.Success) { $optimizedCount++ } else { $skippedCount += $group.Usages.Count }
         }
 
         if (Test-Path -LiteralPath $scratchDir) { Remove-Item -LiteralPath $scratchDir -Recurse -Force -ErrorAction SilentlyContinue }
@@ -366,6 +389,46 @@
                 $usage.SourceJpegQuality = $probe.Value
             }
         }
+    }
+
+    # Run each OptimizeJob's MagickArgs in parallel, returning a hashtable keyed by
+    # GroupKey -> PSCustomObject { Success; AfterSize; ScratchPath }.
+    # Runspaces only invoke magick and check the exit code; all module functions are
+    # inaccessible in the child runspaces. Progress is rendered via the streaming-
+    # downstream pattern (mirrors Update-OptimizeProbesParallel) on progress Id 3
+    # ("Optimizing images"). Set-StrictMode is NOT inherited by runspaces; the parallel
+    # block must not assume it.
+    function Invoke-OptimizeJobsParallel {
+        param(
+            [System.Collections.Generic.List[OptimizeJob]]$jobs
+        )
+
+        $magickExe = $script:MagickExe
+        $total = $jobs.Count
+
+        $rawResults = @($jobs) | ForEach-Object -Parallel {
+            $job = $_
+            & $using:magickExe @($job.MagickArgs) 2>&1 | Out-Null
+            $success   = ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $job.ScratchPath))
+            $afterSize = if ($success) { (Get-Item -LiteralPath $job.ScratchPath).Length } else { 0 }
+            [PSCustomObject]@{
+                GroupKey    = $job.GroupKey
+                ScratchPath = $job.ScratchPath
+                Success     = $success
+                AfterSize   = $afterSize
+            }
+        } -ThrottleLimit ([Environment]::ProcessorCount) | ForEach-Object -Begin { $count = 0 } -Process {
+            $count++
+            Write-Progress -Activity "Optimizing images" -Status "Running: $count of $total" `
+                -PercentComplete (($count / [Math]::Max(1, $total)) * 100) -Id 3
+            $_
+        }
+
+        $resultMap = @{}
+        foreach ($r in $rawResults) {
+            $resultMap[$r.GroupKey] = $r
+        }
+        return $resultMap
     }
 
     function Get-ImageTransparency {
