@@ -149,3 +149,29 @@ Describe 'Get-OptimizationJob (pure build)' {
         }
     }
 }
+
+Describe 'Complete-OptimizationJob' {
+    It 'rejects when savings are below threshold and keeps the original' {
+        InModuleScope Optimize-PptImages {
+            $dir = Join-Path ([System.IO.Path]::GetTempPath()) "commit-$([guid]::NewGuid())"
+            New-Item -ItemType Directory -Path (Join-Path $dir 'ppt/media') -Force | Out-Null
+            try {
+                $media = Join-Path $dir 'ppt/media/image1.jpeg'
+                Set-Content -LiteralPath $media -Value 'original-bytes'
+                $scratch = Join-Path $dir 'scratch.jpeg'
+                Set-Content -LiteralPath $scratch -Value 'this-scratch-is-not-smaller-enough'
+                $u = [ImageUsage]::new(); $u.ImagePhysicalPath = $media; $u.OriginalFileName = 'image1.jpeg'
+                $g = [ImageGroup]::new(); $g.PhysicalPath = $media; $g.OriginalSizeBytes = (Get-Item $media).Length
+                $g.Usages.Add($u)
+                $job = [OptimizeJob]::new(); $job.GroupKey = $media; $job.NewExtension = ''
+                $job.BeforeSize = $g.OriginalSizeBytes; $job.StatusName = 'OptimizeJpeg'
+                $r = Complete-OptimizationJob -job $job -group $g -scratchPath $scratch -success $true -afterSize 999999 -tempDir $dir
+                $r.Success | Should -BeFalse
+                (Test-Path -LiteralPath $media) | Should -BeTrue
+                $u.OptimizationStatus | Should -Be 'Skipped_NoNetSavings'
+            } finally {
+                Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}

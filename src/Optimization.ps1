@@ -693,6 +693,79 @@
         }
     }
 
+    function Complete-OptimizationJob {
+        param(
+            [OptimizeJob]$job,
+            [ImageGroup]$group,
+            [string]$scratchPath,
+            [bool]$success,
+            [long]$afterSize,
+            [string]$tempDir
+        )
+
+        # Magick failed: mark all usages and return.
+        if (-not $success) {
+            foreach ($usage in $group.Usages) {
+                $usage.OptimizationStatus = 'Skipped_Other'
+                $usage.WhyNotOptimized = 'Optimization failed'
+                $usage.ManualActionRequired = $false
+            }
+            return @{ Success = $false }
+        }
+
+        $beforeSize = $job.BeforeSize
+
+        # Savings check: reject if file did not shrink or did not clear the minimum threshold.
+        if ($afterSize -ge $beforeSize -or -not (Test-MinSavingsThreshold -beforeSize $beforeSize -afterSize $afterSize)) {
+            if (Test-Path -LiteralPath $scratchPath) {
+                Remove-Item -LiteralPath $scratchPath -Force
+            }
+            $reason = if ($afterSize -ge $beforeSize) {
+                'No net savings achieved'
+            } else {
+                $actualSavings = (($beforeSize - $afterSize) / $beforeSize) * 100
+                "Savings $($actualSavings.ToString('F1'))% below $($MinSavingsPercent.ToString('F1'))% threshold"
+            }
+            foreach ($usage in $group.Usages) {
+                $usage.OptimizationStatus = 'Skipped_NoNetSavings'
+                $usage.WhyNotOptimized = $reason
+                $usage.ManualActionRequired = $false
+            }
+            return @{ Success = $false }
+        }
+
+        $savedPercent = (($beforeSize - $afterSize) / $beforeSize) * 100
+
+        if ($job.NewExtension -eq '') {
+            # In-place operation: overwrite the original with the scratch file.
+            Move-Item $scratchPath $group.PhysicalPath -Force
+            $group.OptimizedSizeBytes = $afterSize
+            foreach ($usage in $group.Usages) {
+                $usage.AfterSizeBytes = $afterSize
+                $usage.OptimizationStatus = $job.StatusName
+            }
+            $firstUsage = $group.Usages[0]
+            Write-Host "   [OK] Optimized '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
+        } else {
+            # Convert operation: allocate a new media name, update rels, remove the original.
+            $out = New-UniqueMediaPath -basePath $group.PhysicalPath -suffix '' -newExtension $job.NewExtension
+            Move-Item $scratchPath $out.Path -Force
+            foreach ($usage in $group.Usages) {
+                $null = Update-BlipRelationship -usage $usage -tempDir $tempDir -newMediaFileName $out.Name
+                $usage.AfterSizeBytes = $afterSize
+                $usage.OptimizationStatus = $job.StatusName
+                $usage.OptimizedFile = $out.Name
+            }
+            Remove-Item -LiteralPath $group.PhysicalPath -Force
+            $group.OptimizedSizeBytes = $afterSize
+            $group.OptimizedPath = $out.Path
+            $firstUsage = $group.Usages[0]
+            Write-Host "   [CONV] Converted '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
+        }
+
+        return @{ Success = $true }
+    }
+
     function Optimize-Jpeg {
         param(
             [ImageGroup]$group,
