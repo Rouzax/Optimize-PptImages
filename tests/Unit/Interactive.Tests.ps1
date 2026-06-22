@@ -54,3 +54,44 @@ Describe 'Get-PptImageFindings' {
         }
     }
 }
+
+Describe 'Wizard prompt helpers' {
+    It 'maps a preset selection to its value' {
+        InModuleScope Optimize-PptImages {
+            $script:queue = [System.Collections.Generic.Queue[string]]::new()
+            $script:queue.Enqueue('2')
+            $script:WizardReadLine = { param($p) $script:queue.Dequeue() }
+            $presets = @(
+                @{ Label = 'Smallest (1.5)'; Value = 1.5 },
+                @{ Label = 'Balanced (2.0)'; Value = 2.0 },
+                @{ Label = 'Print (3.0)';    Value = 3.0 }
+            )
+            Read-WizardPreset -Prompt 'Headroom' -Hint 'hint' -Presets $presets -Default 2.0 -Min 0.5 -Max 4.0 |
+                Should -Be 2.0
+        }
+    }
+
+    It 're-asks on garbage then accepts a custom value' {
+        InModuleScope Optimize-PptImages {
+            $script:queue = [System.Collections.Generic.Queue[string]]::new()
+            'x', '4', '2.5' | ForEach-Object { $script:queue.Enqueue($_) }  # garbage, choose Custom(4), then 2.5
+            $script:WizardReadLine = { param($p) $script:queue.Dequeue() }
+            $presets = @(
+                @{ Label = 'Smallest (1.5)'; Value = 1.5 },
+                @{ Label = 'Balanced (2.0)'; Value = 2.0 },
+                @{ Label = 'Print (3.0)';    Value = 3.0 }
+            )
+            Read-WizardPreset -Prompt 'Headroom' -Hint 'hint' -Presets $presets -Default 2.0 -Min 0.5 -Max 4.0 |
+                Should -Be 2.5
+        }
+    }
+
+    It 'returns default on empty yes/no input' {
+        InModuleScope Optimize-PptImages {
+            $script:queue = [System.Collections.Generic.Queue[string]]::new()
+            $script:queue.Enqueue('')
+            $script:WizardReadLine = { param($p) $script:queue.Dequeue() }
+            Read-WizardYesNo -Prompt 'Optimize slides?' -Default $true | Should -BeTrue
+        }
+    }
+}

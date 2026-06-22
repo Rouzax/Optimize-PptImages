@@ -63,4 +63,66 @@ function Get-PptImageFindings {
     }
 }
 
+    # Input seam so tests can feed scripted answers without a TTY.
+    $script:WizardReadLine = { param($promptText) Read-Host -Prompt $promptText }
+
+    function Read-WizardLine {
+        param([string]$Prompt)
+        return (& $script:WizardReadLine $Prompt)
+    }
+
+    function Read-WizardYesNo {
+        param([string]$Prompt, [bool]$Default)
+        $suffix = if ($Default) { '[Y/n]' } else { '[y/N]' }
+        while ($true) {
+            $raw = (Read-WizardLine "$Prompt $suffix").Trim().ToLowerInvariant()
+            if ($raw -eq '') { return $Default }
+            if ($raw -in @('y', 'yes')) { return $true }
+            if ($raw -in @('n', 'no'))  { return $false }
+            Write-Host "  Please answer y or n." -ForegroundColor DarkYellow
+        }
+    }
+
+    function Read-WizardPreset {
+        param(
+            [string]$Prompt,
+            [string]$Hint,
+            [object[]]$Presets,
+            [double]$Default,
+            [double]$Min,
+            [double]$Max
+        )
+        Write-Host ""
+        Write-Host $Prompt -ForegroundColor Cyan
+        if ($Hint) { Write-Host "  $Hint" -ForegroundColor Gray }
+        $i = 1
+        foreach ($p in $Presets) { Write-Host "  $i) $($p.Label)"; $i++ }
+        $customIndex = $i
+        Write-Host "  $customIndex) Custom"
+
+        while ($true) {
+            $raw = (Read-WizardLine "Choose 1-$customIndex [Enter for default $Default]").Trim()
+            if ($raw -eq '') { return $Default }
+            $sel = 0
+            if (-not [int]::TryParse($raw, [ref]$sel)) {
+                Write-Host "  Enter a number between 1 and $customIndex." -ForegroundColor DarkYellow
+                continue
+            }
+            if ($sel -ge 1 -and $sel -lt $customIndex) {
+                return [double]$Presets[$sel - 1].Value
+            }
+            if ($sel -eq $customIndex) {
+                while ($true) {
+                    $rawCustom = (Read-WizardLine "Custom value ($Min-$Max)").Trim()
+                    $val = 0.0
+                    if ([double]::TryParse($rawCustom, [ref]$val) -and $val -ge $Min -and $val -le $Max) {
+                        return $val
+                    }
+                    Write-Host "  Enter a number between $Min and $Max." -ForegroundColor DarkYellow
+                }
+            }
+            Write-Host "  Enter a number between 1 and $customIndex." -ForegroundColor DarkYellow
+        }
+    }
+
 #endregion
