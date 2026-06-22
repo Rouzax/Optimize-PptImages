@@ -157,3 +157,78 @@ Describe 'Format-PptCommandLine' {
         }
     }
 }
+
+Describe 'Format-PptFindingsSummary' {
+    It 'renders two blocks and caps offenders at five' {
+        InModuleScope Optimize-PptImages {
+            $block = {
+                param($unique, $offenderCount)
+                $offenders = 1..$offenderCount | ForEach-Object {
+                    [PSCustomObject]@{ Name = "img$_.png"; SourceW = 8000; SourceH = 6000; DisplayW = 1200; DisplayH = 900; Ratio = (50 - $_) }
+                }
+                [PSCustomObject]@{
+                    UsageCount = $unique; UniqueCount = $unique; TotalBytes = 1048576
+                    FormatBreakdown = [ordered]@{ png = $unique }
+                    ResizeCandidateCount = $offenderCount; ConversionCandidateCount = 0
+                    TopOffenders = @($offenders | Select-Object -First 5)
+                }
+            }
+            $findings = [PSCustomObject]@{ Slides = (& $block 7 7); MastersLayouts = (& $block 2 0) }
+            $lines = Format-PptFindingsSummary -Findings $findings
+            ($lines -join "`n") | Should -BeLike '*Slides*'
+            ($lines -join "`n") | Should -BeLike '*Masters*'
+            ($lines -join "`n") | Should -BeLike '*+2 more*'   # 7 candidates, 5 shown
+        }
+    }
+}
+
+Describe 'Show-PptInteractiveWizard' {
+    BeforeEach {
+        InModuleScope Optimize-PptImages {
+            $script:findings = [PSCustomObject]@{
+                Slides = [PSCustomObject]@{
+                    UsageCount = 3; UniqueCount = 3; TotalBytes = 3145728
+                    FormatBreakdown = [ordered]@{ png = 2; jpg = 1 }
+                    ResizeCandidateCount = 1; ConversionCandidateCount = 2; TopOffenders = @()
+                }
+                MastersLayouts = [PSCustomObject]@{
+                    UsageCount = 0; UniqueCount = 0; TotalBytes = 0
+                    FormatBreakdown = [ordered]@{}; ResizeCandidateCount = 0
+                    ConversionCandidateCount = 0; TopOffenders = @()
+                }
+            }
+            $script:defaults = [PSCustomObject]@{
+                OptimizeSlides = $true; OptimizeMastersAndLayouts = $false
+                CropSlides = $false; CropMastersAndLayouts = $false; CleanUnusedLayouts = $false
+                HeadroomFactor = 2.0; JpegQuality = 95; OutputPath = ''
+                TransparencyThresholdPercent = 0.1; MinSavingsPercent = 0.0
+                IncludeSlides = @(); ExcludeSlides = @()
+            }
+        }
+    }
+
+    It 'collects answers and returns Run' {
+        InModuleScope Optimize-PptImages {
+            $script:queue = [System.Collections.Generic.Queue[string]]::new()
+            # ops: slides Y, masters N, crop slides N, crop masters N, clean N
+            # headroom: 2, jpeg: 3, output: Enter, advanced gate: N, menu: R
+            'y','n','n','n','n','2','3','','n','r' | ForEach-Object { $script:queue.Enqueue($_) }
+            $script:WizardReadLine = { param($p) $script:queue.Dequeue() }
+            $r = Show-PptInteractiveWizard -InputPath 'in.pptx' -Findings $script:findings -Defaults $script:defaults
+            $r.Action | Should -Be 'Run'
+            $r.Answers.OptimizeSlides | Should -BeTrue
+            $r.Answers.HeadroomFactor | Should -Be 2.0
+            $r.Answers.JpegQuality | Should -Be 95
+        }
+    }
+
+    It 'returns Quit when the user quits at the menu' {
+        InModuleScope Optimize-PptImages {
+            $script:queue = [System.Collections.Generic.Queue[string]]::new()
+            'y','n','n','n','n','2','3','','n','q' | ForEach-Object { $script:queue.Enqueue($_) }
+            $script:WizardReadLine = { param($p) $script:queue.Dequeue() }
+            $r = Show-PptInteractiveWizard -InputPath 'in.pptx' -Findings $script:findings -Defaults $script:defaults
+            $r.Action | Should -Be 'Quit'
+        }
+    }
+}
