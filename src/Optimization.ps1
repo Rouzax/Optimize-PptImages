@@ -67,7 +67,10 @@
         
         $totalGroups = $inScopeGroups.Count
         $currentGroup = 0
-        
+
+        $scratchDir = Join-Path $tempDir '.opt-scratch'
+        New-Item -ItemType Directory -Path $scratchDir -Force | Out-Null
+
         foreach ($group in $sortedGroups) {
             $mediaFile = Split-Path $group.PhysicalPath -Leaf
             
@@ -114,21 +117,39 @@
                 Width = ($group.Usages | Measure-Object -Property DisplayWidthPx -Maximum).Maximum
                 Height = ($group.Usages | Measure-Object -Property DisplayHeightPx -Maximum).Maximum
             }
-            
             $firstUsage = $hasIncludedUsage | Select-Object -First 1
-            
+
             if ($PSCmdlet.ShouldProcess($mediaFile, "Optimize image")) {
-                Write-Verbose "Optimizing $mediaFile [display: $($maxDisplay.Width)x$($maxDisplay.Height)px] from $($firstUsage.Location)"
-                
-                $result = Invoke-OptimizationOperation -group $group -maxDisplay $maxDisplay -tempDir $tempDir
-                if ($result.Success) {
-                    $optimizedCount++
-                } else {
-                    $skippedCount += $group.Usages.Count
+                # Phase 1 (sequential here; parallelized in a later task): cache probe values.
+                $ext = [System.IO.Path]::GetExtension($group.PhysicalPath).ToLower()
+                if ($ext -in @('.png') -or $ext -in $script:Config.CONVERTIBLE_FORMATS) {
+                    $transp = Get-ImageTransparency -imagePath $group.PhysicalPath
+                    foreach ($u in $group.Usages) { $u.EffectiveTransparencyPercent = $transp }
+                } elseif ($ext -in @('.jpg', '.jpeg')) {
+                    $q = Get-JpegQuality -ImagePath $group.PhysicalPath
+                    foreach ($u in $group.Usages) { $u.SourceJpegQuality = $q }
                 }
+
+                # Phase 2: build a job or set skip statuses.
+                $job = Get-OptimizationJob -group $group -maxDisplay $maxDisplay -scratchDir $scratchDir
+                if (-not $job) {
+                    if ($group.Usages[0].OptimizationStatus -match '^(Skipped|NoChange)') { $skippedCount += $group.Usages.Count }
+                    continue
+                }
+
+                # Phase 3 (sequential here): run magick to the scratch file.
+                & $script:MagickExe @($job.MagickArgs) 2>&1 | Out-Null
+                $success = ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $job.ScratchPath))
+                $afterSize = if ($success) { (Get-Item -LiteralPath $job.ScratchPath).Length } else { 0 }
+
+                # Phase 4: commit (sequential, slide order).
+                $result = Complete-OptimizationJob -job $job -group $group -scratchPath $job.ScratchPath -success $success -afterSize $afterSize -tempDir $tempDir
+                if ($result.Success) { $optimizedCount++ } else { $skippedCount += $group.Usages.Count }
             }
         }
-        
+
+        if (Test-Path -LiteralPath $scratchDir) { Remove-Item -LiteralPath $scratchDir -Recurse -Force -ErrorAction SilentlyContinue }
+
         Write-Progress -Activity "Optimizing images" -Completed -Id 3
         Write-Host "[STATS] Optimization phase complete: $optimizedCount optimized, $skippedCount skipped" -ForegroundColor Green
     }
@@ -254,144 +275,6 @@
         }
         
         return $null
-    }
-
-    function Invoke-OptimizationOperation {
-        param(
-            [ImageGroup]$group,
-            [hashtable]$maxDisplay,
-            [string]$tempDir
-        )
-        
-        try {
-            # Source dimensions are front-loaded in parallel; read the cached value and
-            # fall back to a live probe only if it is still missing.
-            $known = $group.Usages | Where-Object { $_.SourceWidthPx -gt 0 } | Select-Object -First 1
-            if ($known) {
-                $srcWidth = $known.SourceWidthPx
-                $srcHeight = $known.SourceHeightPx
-            } else {
-                $dims = Get-ImageDimensions -ImagePath $group.PhysicalPath
-                $srcWidth = $dims.Width
-                $srcHeight = $dims.Height
-            }
-            
-            # Calculate target size
-            $desiredWidth = [Math]::Ceiling($maxDisplay.Width * $HeadroomFactor)
-            $desiredHeight = [Math]::Ceiling($maxDisplay.Height * $HeadroomFactor)
-            
-            # For background/fill images with no display size, use source dimensions
-            if ($desiredWidth -eq 0 -or $desiredHeight -eq 0) {
-                $desiredWidth = $srcWidth
-                $desiredHeight = $srcHeight
-            }
-            
-            $targetWidth = [Math]::Min($srcWidth, $desiredWidth)
-            $targetHeight = [Math]::Min($srcHeight, $desiredHeight)
-            
-            # Update usages
-            foreach ($usage in $group.Usages) {
-                $usage.SourceWidthPx = $srcWidth
-                $usage.SourceHeightPx = $srcHeight
-                $usage.TargetWidthPx = $targetWidth
-                $usage.TargetHeightPx = $targetHeight
-            }
-            
-            Write-Verbose "  Dimensions: source ${srcWidth}x${srcHeight}px -> target ${targetWidth}x${targetHeight}px [HeadroomFactor: $HeadroomFactor]"
-            
-            # Check JPEG quality for quality preservation
-            $ext = [System.IO.Path]::GetExtension($group.PhysicalPath).ToLower()
-            if ($ext -in @('.jpg', '.jpeg')) {
-                $sourceQuality = Get-JpegQuality -ImagePath $group.PhysicalPath
-                foreach ($usage in $group.Usages) {
-                    $usage.SourceJpegQuality = $sourceQuality
-                }
-                
-                # If source quality is at or below target and dimensions match, skip
-                if ($sourceQuality -gt 0 -and $sourceQuality -le $JpegQuality -and 
-                    $srcWidth -eq $targetWidth -and $srcHeight -eq $targetHeight) {
-                    $firstUsage = $group.Usages[0]
-                    foreach ($usage in $group.Usages) {
-                        $usage.OptimizationStatus = 'Skipped_AlreadyOptimal'
-                        $usage.WhyNotOptimized = "Already at optimal quality (Q$sourceQuality <= Q$JpegQuality) and target size"
-                        $usage.ManualActionRequired = $false
-                    }
-                    Write-Host "   [SKIP] Skipped '$($firstUsage.ShapeName)' on $($firstUsage.Location): already at target size and quality (Q$sourceQuality)" -ForegroundColor Gray
-                    return @{ Success = $false }
-                }
-            }
-            
-            # Handle convertible formats (BMP, TIFF, GIF)
-            if ($ext -in $script:Config.CONVERTIBLE_FORMATS) {
-                $result = ConvertTo-OptimizedFormat -group $group -targetWidth $targetWidth -targetHeight $targetHeight -tempDir $tempDir
-                return $result
-            }
-            
-            # Check if already at target
-            if ($srcWidth -eq $targetWidth -and $srcHeight -eq $targetHeight) {
-                # Check if PNG can be converted to JPEG
-                if ($group.PhysicalPath -match '\.png$') {
-                    $transp = Get-ImageTransparency -imagePath $group.PhysicalPath
-                    foreach ($usage in $group.Usages) {
-                        $usage.EffectiveTransparencyPercent = $transp
-                    }
-                    
-                    if ($transp -le $TransparencyThresholdPercent) {
-                        # Opaque - convert PNG to JPEG
-                        $firstUsage = $group.Usages[0]
-                        Write-Host "   [INFO] Effective transparency $($transp.ToString('F1'))% for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - treating as opaque" -ForegroundColor Cyan
-                        $result = ConvertTo-Jpeg -group $group -tempDir $tempDir -resize $false
-                        return $result
-                    }
-                }
-                
-                $firstUsage = $group.Usages[0]
-                foreach ($usage in $group.Usages) {
-                    $usage.OptimizationStatus = 'NoChangeNeeded'
-                    $usage.WhyNotOptimized = 'Already at target size'
-                    $usage.ManualActionRequired = $false
-                }
-                Write-Host "   [SKIP] No change needed for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (already at target)" -ForegroundColor Gray
-                return @{ Success = $false }
-            }
-            
-            # Determine optimization strategy
-            if ($ext -eq '.jpg' -or $ext -eq '.jpeg') {
-                $result = Optimize-Jpeg -group $group -targetWidth $targetWidth -targetHeight $targetHeight -tempDir $tempDir
-            } elseif ($ext -eq '.png') {
-                # Always check real transparency for PNGs (even if alpha channel exists)
-                $transp = Get-ImageTransparency -imagePath $group.PhysicalPath
-                foreach ($usage in $group.Usages) {
-                    $usage.EffectiveTransparencyPercent = $transp
-                }
-                
-                if ($transp -le $TransparencyThresholdPercent) {
-                    # Opaque or negligible transparency - convert to JPEG
-                    $firstUsage = $group.Usages[0]
-                    Write-Host "   [INFO] Effective transparency $($transp.ToString('F1'))% for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - treating as opaque" -ForegroundColor Cyan
-                    $result = ConvertTo-Jpeg -group $group -tempDir $tempDir -resize $true
-                } else {
-                    # Has meaningful transparency - keep as PNG
-                    $result = Optimize-PngWithAlpha -group $group -targetWidth $targetWidth -targetHeight $targetHeight -tempDir $tempDir
-                }
-            } else {
-                foreach ($usage in $group.Usages) {
-                    $usage.OptimizationStatus = 'Skipped_Other'
-                    $usage.WhyNotOptimized = 'Unsupported format'
-                }
-                return @{ Success = $false }
-            }
-            
-            return $result
-            
-        } catch {
-            Write-Warning "Optimization failed for $($group.PhysicalPath): $_"
-            foreach ($usage in $group.Usages) {
-                $usage.OptimizationStatus = 'Skipped_Other'
-                $usage.WhyNotOptimized = "Optimization failed: $_"
-            }
-            return @{ Success = $false }
-        }
     }
 
     function Get-ImageTransparency {
@@ -720,8 +603,9 @@
             if (Test-Path -LiteralPath $scratchPath) {
                 Remove-Item -LiteralPath $scratchPath -Force
             }
+            $isConvert = $job.NewExtension -ne ''
             $reason = if ($afterSize -ge $beforeSize) {
-                'No net savings achieved'
+                if ($isConvert) { 'Conversion yielded no savings' } else { 'No net savings achieved' }
             } else {
                 $actualSavings = (($beforeSize - $afterSize) / $beforeSize) * 100
                 "Savings $($actualSavings.ToString('F1'))% below $($MinSavingsPercent.ToString('F1'))% threshold"
@@ -745,9 +629,15 @@
                 $usage.OptimizationStatus = $job.StatusName
             }
             $firstUsage = $group.Usages[0]
-            Write-Host "   [OK] Optimized '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
+            $okVerb = switch ($job.Operation) {
+                'OptimizeJpeg'    { 'Optimized JPEG' }
+                'OptimizePngAlpha' { 'Optimized PNG with transparency' }
+                default            { 'Optimized' }
+            }
+            Write-Host "   [OK] $okVerb for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
         } else {
             # Convert operation: allocate a new media name, update rels, remove the original.
+            $srcExtForMsg = [System.IO.Path]::GetExtension($group.PhysicalPath).ToLower()
             $out = New-UniqueMediaPath -basePath $group.PhysicalPath -suffix '' -newExtension $job.NewExtension
             Move-Item $scratchPath $out.Path -Force
             foreach ($usage in $group.Usages) {
@@ -760,369 +650,14 @@
             $group.OptimizedSizeBytes = $afterSize
             $group.OptimizedPath = $out.Path
             $firstUsage = $group.Usages[0]
-            Write-Host "   [CONV] Converted '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
+            $convVerb = if ($job.Operation -eq 'ConvertPngToJpeg') {
+                'Converted PNG to JPEG'
+            } else {
+                "Converted $srcExtForMsg to $($job.NewExtension)"
+            }
+            Write-Host "   [CONV] $convVerb for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
         }
 
-        return @{ Success = $true }
-    }
-
-    function Optimize-Jpeg {
-        param(
-            [ImageGroup]$group,
-            [int]$targetWidth,
-            [int]$targetHeight,
-            [string]$tempDir
-        )
-        
-        Write-Verbose "  Optimizing JPEG: target ${targetWidth}x${targetHeight}px, quality $JpegQuality"
-        
-        $outputPath = "$($group.PhysicalPath).tmp"
-        
-        $magickArgs = @(
-            $group.PhysicalPath,
-            '-filter', $script:Config.RESIZE_FILTER,
-            '-resize', "${targetWidth}x${targetHeight}>",
-            '-strip',
-            '-quality', $JpegQuality,
-            '-define', 'jpeg:optimize-coding=true',
-            '-define', 'jpeg:dct-method=float',
-            '-sampling-factor', $script:Config.JPEG_SAMPLING_FACTOR_DEFAULT,
-            $outputPath
-        )
-        
-        & $script:MagickExe $magickArgs 2>&1 | Out-Null
-        
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $outputPath)) {
-            throw "JPEG optimization failed"
-        }
-        
-        $beforeSize = $group.OriginalSizeBytes
-        $afterSize = (Get-Item $outputPath).Length
-        
-        # Check minimum savings threshold
-        if ($afterSize -ge $beforeSize -or -not (Test-MinSavingsThreshold -beforeSize $beforeSize -afterSize $afterSize)) {
-            Remove-Item -LiteralPath $outputPath -Force
-            $firstUsage = $group.Usages[0]
-            
-            $reason = if ($afterSize -ge $beforeSize) {
-                'No net savings achieved'
-            } else {
-                $actualSavings = (($beforeSize - $afterSize) / $beforeSize) * 100
-                "Savings $($actualSavings.ToString('F1'))% below $($MinSavingsPercent.ToString('F1'))% threshold"
-            }
-            
-            foreach ($usage in $group.Usages) {
-                $usage.OptimizationStatus = 'Skipped_NoNetSavings'
-                $usage.WhyNotOptimized = $reason
-                $usage.ManualActionRequired = $false
-            }
-            
-            if (Test-VerboseMode) {
-                Write-Verbose "  JPEG optimization rejected: $(Format-ByteSize $beforeSize) -> $(Format-ByteSize $afterSize)"
-            }
-            
-            Write-Host "   [INFO] $reason for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - kept original" -ForegroundColor Cyan
-            return @{ Success = $false }
-        }
-        
-        # Replace original
-        Move-Item $outputPath $group.PhysicalPath -Force
-        $group.OptimizedSizeBytes = $afterSize
-        
-        $savedPercent = (($beforeSize - $afterSize) / $beforeSize) * 100
-        $firstUsage = $group.Usages[0]
-        
-        foreach ($usage in $group.Usages) {
-            $usage.AfterSizeBytes = $afterSize
-            $usage.OptimizationStatus = 'OptimizedJpeg'
-        }
-        
-        Write-Host "   [OK] Optimized JPEG for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
-        
-        return @{ Success = $true }
-    }
-
-    function Optimize-PngWithAlpha {
-        param(
-            [ImageGroup]$group,
-            [int]$targetWidth,
-            [int]$targetHeight,
-            [string]$tempDir
-        )
-        
-        Write-Verbose "  Optimizing PNG with transparency: target ${targetWidth}x${targetHeight}px, compression level $($script:Config.PNG_COMPRESSION_LEVEL)"
-        
-        $outputPath = "$($group.PhysicalPath).tmp"
-        
-        $magickArgs = @(
-            $group.PhysicalPath,
-            '-filter', $script:Config.RESIZE_FILTER,
-            '-resize', "${targetWidth}x${targetHeight}>",
-            '-strip',
-            '-define', "png:compression-level=$($script:Config.PNG_COMPRESSION_LEVEL)",
-            '-define', 'png:color-type=6',
-            $outputPath
-        )
-        
-        & $script:MagickExe $magickArgs 2>&1 | Out-Null
-        
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $outputPath)) {
-            throw "PNG optimization failed"
-        }
-        
-        $beforeSize = $group.OriginalSizeBytes
-        $afterSize = (Get-Item $outputPath).Length
-        
-        # Check minimum savings threshold
-        if ($afterSize -ge $beforeSize -or -not (Test-MinSavingsThreshold -beforeSize $beforeSize -afterSize $afterSize)) {
-            Remove-Item -LiteralPath $outputPath -Force
-            $firstUsage = $group.Usages[0]
-            
-            $reason = if ($afterSize -ge $beforeSize) {
-                'No net savings achieved'
-            } else {
-                $actualSavings = (($beforeSize - $afterSize) / $beforeSize) * 100
-                "Savings $($actualSavings.ToString('F1'))% below $($MinSavingsPercent.ToString('F1'))% threshold"
-            }
-            
-            foreach ($usage in $group.Usages) {
-                $usage.OptimizationStatus = 'Skipped_NoNetSavings'
-                $usage.WhyNotOptimized = $reason
-                $usage.ManualActionRequired = $false
-            }
-            
-            if (Test-VerboseMode) {
-                Write-Verbose "  PNG optimization rejected: $(Format-ByteSize $beforeSize) -> $(Format-ByteSize $afterSize)"
-            }
-            
-            Write-Host "   [INFO] $reason for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - kept original" -ForegroundColor Cyan
-            return @{ Success = $false }
-        }
-        
-        # Replace original
-        Move-Item $outputPath $group.PhysicalPath -Force
-        $group.OptimizedSizeBytes = $afterSize
-        
-        $savedPercent = (($beforeSize - $afterSize) / $beforeSize) * 100
-        $firstUsage = $group.Usages[0]
-        
-        foreach ($usage in $group.Usages) {
-            $usage.AfterSizeBytes = $afterSize
-            $usage.OptimizationStatus = 'OptimizedPngAlpha'
-        }
-        
-        Write-Host "   [OK] Optimized PNG with transparency for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
-        
-        return @{ Success = $true }
-    }
-
-    function ConvertTo-Jpeg {
-        param(
-            [ImageGroup]$group,
-            [string]$tempDir,
-            [bool]$resize
-        )
-        
-        $srcFile = Split-Path $group.PhysicalPath -Leaf
-        Write-Verbose "  Converting PNG->JPEG: $srcFile [resize: $resize, quality: $JpegQuality]"
-        
-        # Generate unique JPEG filename
-        $output = New-UniqueMediaPath -basePath $group.PhysicalPath -suffix '' -newExtension '.jpeg'
-        $outputPath = $output.Path
-        $outputName = $output.Name
-        
-        $magickArgs = @($group.PhysicalPath)
-        
-        if ($resize) {
-            $usage = $group.Usages[0]
-            $magickArgs += @(
-                '-filter', $script:Config.RESIZE_FILTER,
-                '-resize', "$($usage.TargetWidthPx)x$($usage.TargetHeightPx)>"
-            )
-        }
-        
-        $magickArgs += @(
-            '-strip',
-            '-quality', $JpegQuality,
-            '-define', 'jpeg:optimize-coding=true',
-            '-define', 'jpeg:dct-method=float',
-            '-sampling-factor', $script:Config.JPEG_SAMPLING_FACTOR_DEFAULT,
-            $outputPath
-        )
-        
-        & $script:MagickExe $magickArgs 2>&1 | Out-Null
-        
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $outputPath)) {
-            throw "PNG to JPEG conversion failed"
-        }
-        
-        $beforeSize = $group.OriginalSizeBytes
-        $afterSize = (Get-Item $outputPath).Length
-        
-        # Check minimum savings threshold
-        if ($afterSize -ge $beforeSize -or -not (Test-MinSavingsThreshold -beforeSize $beforeSize -afterSize $afterSize)) {
-            Remove-Item -LiteralPath $outputPath -Force
-            $firstUsage = $group.Usages[0]
-            
-            $reason = if ($afterSize -ge $beforeSize) {
-                'Conversion yielded no savings'
-            } else {
-                $actualSavings = (($beforeSize - $afterSize) / $beforeSize) * 100
-                "Savings $($actualSavings.ToString('F1'))% below $($MinSavingsPercent.ToString('F1'))% threshold"
-            }
-            
-            foreach ($usage in $group.Usages) {
-                $usage.OptimizationStatus = 'Skipped_NoNetSavings'
-                $usage.WhyNotOptimized = $reason
-                $usage.ManualActionRequired = $false
-            }
-            
-            if (Test-VerboseMode) {
-                Write-Verbose "  PNG->JPEG conversion rejected: $(Format-ByteSize $beforeSize) -> $(Format-ByteSize $afterSize)"
-            }
-            
-            Write-Host "   [INFO] $reason for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - kept original" -ForegroundColor Cyan
-            return @{ Success = $false }
-        }
-        
-        # Update all relationships pointing to this image
-        Write-Verbose "  Updating $($group.Usages.Count) relationship(s) to point to new JPEG: $outputName"
-        
-        foreach ($usage in $group.Usages) {
-            $null = Update-BlipRelationship -usage $usage -tempDir $tempDir -newMediaFileName $outputName
-            
-            $usage.AfterSizeBytes = $afterSize
-            $usage.OptimizationStatus = 'ConvertedPngToJpeg'
-            $usage.OptimizedFile = $outputName
-        }
-        
-        # Remove original PNG
-        Remove-Item -LiteralPath $group.PhysicalPath -Force
-        $group.OptimizedSizeBytes = $afterSize
-        $group.OptimizedPath = $outputPath
-        
-        $savedPercent = (($beforeSize - $afterSize) / $beforeSize) * 100
-        $firstUsage = $group.Usages[0]
-        Write-Host "   [CONV] Converted PNG to JPEG for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
-        
-        return @{ Success = $true }
-    }
-
-    function ConvertTo-OptimizedFormat {
-        param(
-            [ImageGroup]$group,
-            [int]$targetWidth,
-            [int]$targetHeight,
-            [string]$tempDir
-        )
-        
-        $srcFile = Split-Path $group.PhysicalPath -Leaf
-        $ext = [System.IO.Path]::GetExtension($group.PhysicalPath).ToLower()
-        
-        # Check if image has transparency (for TIFF and GIF)
-        $hasTransparency = $false
-        if ($ext -in @('.tif', '.tiff', '.gif')) {
-            $transp = Get-ImageTransparency -imagePath $group.PhysicalPath
-            $hasTransparency = $transp -gt $TransparencyThresholdPercent
-            foreach ($usage in $group.Usages) {
-                $usage.EffectiveTransparencyPercent = $transp
-            }
-            
-            if ($hasTransparency) {
-                $firstUsage = $group.Usages[0]
-                Write-Host "   [INFO] Effective transparency $($transp.ToString('F1').Replace('.', ','))% for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - keeping as PNG" -ForegroundColor Cyan
-            } else {
-                $firstUsage = $group.Usages[0]
-                Write-Host "   [INFO] Effective transparency $($transp.ToString('F1').Replace('.', ','))% for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - treating as opaque" -ForegroundColor Cyan
-            }
-        }
-        
-        # Determine output format
-        $outputExt = if ($hasTransparency) { '.png' } else { '.jpeg' }
-        
-        Write-Verbose "  Converting $ext->$($outputExt): $srcFile [target: ${targetWidth}x${targetHeight}px]"
-        
-        # Generate unique filename
-        $output = New-UniqueMediaPath -basePath $group.PhysicalPath -suffix '' -newExtension $outputExt
-        $outputPath = $output.Path
-        $outputName = $output.Name
-        
-        $magickArgs = @(
-            $group.PhysicalPath,
-            '-filter', $script:Config.RESIZE_FILTER,
-            '-resize', "${targetWidth}x${targetHeight}>",
-            '-strip'
-        )
-        
-        if ($outputExt -eq '.jpeg') {
-            $magickArgs += @(
-                '-quality', $JpegQuality,
-                '-define', 'jpeg:optimize-coding=true',
-                '-define', 'jpeg:dct-method=float',
-                '-sampling-factor', $script:Config.JPEG_SAMPLING_FACTOR_DEFAULT
-            )
-        } else {
-            $magickArgs += @(
-                '-define', "png:compression-level=$($script:Config.PNG_COMPRESSION_LEVEL)",
-                '-define', 'png:color-type=6'
-            )
-        }
-        
-        $magickArgs += $outputPath
-        
-        & $script:MagickExe $magickArgs 2>&1 | Out-Null
-        
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $outputPath)) {
-            throw "$ext conversion failed"
-        }
-        
-        $beforeSize = $group.OriginalSizeBytes
-        $afterSize = (Get-Item $outputPath).Length
-        
-        # Check minimum savings threshold
-        if (-not (Test-MinSavingsThreshold -beforeSize $beforeSize -afterSize $afterSize)) {
-            Remove-Item -LiteralPath $outputPath -Force
-            $firstUsage = $group.Usages[0]
-            
-            $reason = if ($afterSize -ge $beforeSize) {
-                'Conversion yielded no savings'
-            } else {
-                $actualSavings = (($beforeSize - $afterSize) / $beforeSize) * 100
-                "Savings $($actualSavings.ToString('F1'))% below $($MinSavingsPercent.ToString('F1'))% threshold"
-            }
-            
-            foreach ($usage in $group.Usages) {
-                $usage.OptimizationStatus = 'Skipped_NoNetSavings'
-                $usage.WhyNotOptimized = $reason
-                $usage.ManualActionRequired = $false
-            }
-            
-            Write-Host "   [INFO] $reason for '$($firstUsage.ShapeName)' on $($firstUsage.Location) - kept original" -ForegroundColor Cyan
-            return @{ Success = $false }
-        }
-        
-        # Update all relationships
-        Write-Verbose "  Updating $($group.Usages.Count) relationship(s) to point to new file: $outputName"
-        
-        $statusName = if ($outputExt -eq '.jpeg') { 'ConvertedToJpeg' } else { 'ConvertedToPng' }
-        
-        foreach ($usage in $group.Usages) {
-            $null = Update-BlipRelationship -usage $usage -tempDir $tempDir -newMediaFileName $outputName
-            
-            $usage.AfterSizeBytes = $afterSize
-            $usage.OptimizationStatus = $statusName
-            $usage.OptimizedFile = $outputName
-        }
-        
-        # Remove original
-        Remove-Item -LiteralPath $group.PhysicalPath -Force
-        $group.OptimizedSizeBytes = $afterSize
-        $group.OptimizedPath = $outputPath
-        
-        $savedPercent = (($beforeSize - $afterSize) / $beforeSize) * 100
-        $firstUsage = $group.Usages[0]
-        Write-Host "   [CONV] Converted $ext to $outputExt for '$($firstUsage.ShapeName)' on $($firstUsage.Location) (saved $($savedPercent.ToString('F1'))%)" -ForegroundColor Green
-        
         return @{ Success = $true }
     }
 
