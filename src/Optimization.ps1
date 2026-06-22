@@ -513,8 +513,7 @@
         $targetHeight = [Math]::Min($srcHeight, $desiredHeight)
 
         # Write source and target dims onto every usage so the CSV report has accurate values.
-        # This mirrors the placement in Invoke-OptimizationOperation and runs regardless of which
-        # branch (skip, convert, resize) follows.
+        # Runs regardless of which branch (skip, convert, resize) follows.
         foreach ($usage in $group.Usages) {
             $usage.SourceWidthPx  = $srcWidth
             $usage.SourceHeightPx = $srcHeight
@@ -647,33 +646,8 @@
             return $null
         }
 
-        # Needs resize.
-        if ($ext -in @('.jpg', '.jpeg')) {
-            # Already handled above; this branch is unreachable but kept for completeness.
-            $outExt      = $ext
-            $scratchPath = Join-Path $scratchDir ("$([guid]::NewGuid())$outExt")
-            $magickArgs  = @(
-                $group.PhysicalPath,
-                '-filter', $script:Config.RESIZE_FILTER,
-                '-resize', "${targetWidth}x${targetHeight}>",
-                '-strip',
-                '-quality', $JpegQuality,
-                '-define', 'jpeg:optimize-coding=true',
-                '-define', 'jpeg:dct-method=float',
-                '-sampling-factor', $script:Config.JPEG_SAMPLING_FACTOR_DEFAULT,
-                $scratchPath
-            )
-            $job = [OptimizeJob]::new()
-            $job.GroupKey     = $group.PhysicalPath
-            $job.SourcePath   = $group.PhysicalPath
-            $job.ScratchPath  = $scratchPath
-            $job.MagickArgs   = $magickArgs
-            $job.Operation    = 'OptimizeJpeg'
-            $job.StatusName   = 'OptimizedJpeg'
-            $job.BeforeSize   = $group.OriginalSizeBytes
-            $job.NewExtension = ''
-            return $job
-        } elseif ($ext -eq '.png') {
+        # Needs resize: PNG only (JPEG and convertible formats are handled above and always return).
+        if ($ext -eq '.png') {
             $transp = $knownUsage.EffectiveTransparencyPercent
             if ($transp -le $TransparencyThresholdPercent) {
                 # Opaque PNG needing resize: convert to JPEG with resize.

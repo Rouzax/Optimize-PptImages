@@ -430,10 +430,7 @@ The script detects Morph transitions and:
 [STATS] Cropping phase complete: 6 cropped, 3 skipped
 
 [PROC] Optimizing images...
-   [INFO] Effective transparency 0.0% for 'Picture 2' on Slide 1 -- treating as opaque
-   [CONV] Converted PNG to JPEG for 'Picture 2' on Slide 1 (saved 97.7%)
-   [OK] Optimized PNG with transparency for 'Picture 3' on Slide 2 (saved 91.7%)
-   [SKIP] Skipped 'Picture 3' on Slide 20: already at target size and quality (Q95)
+   [SKIP] 'Picture 5' on Slide 3: has a soft crop -- add -CropSlides to materialize it first
 [STATS] Optimization phase complete: 12 optimized, 10 skipped
 
 [CLEAN] Cleaning up unreferenced media...
@@ -455,6 +452,14 @@ The script detects Morph transitions and:
 [OUT] Output: D:\Temp\PowerPoint\Test Deck.optimized.pptx
 [OUT] Report: D:\Temp\PowerPoint\Test Deck.optimized.opt-report.csv
 ```
+
+By default, routine per-image detail (`[OK]`, `[CONV]`, `[INFO]` lines showing savings percentages) is suppressed. To see it, add `-Verbose`.
+
+Items that require your attention still appear at normal verbosity. `[SKIP]` lines with a suggested flag (for example, "add `-CropSlides`") are shown in gray so you can see which images were skipped and why.
+
+Phase-level headers (`[PROC] Optimizing images...`) and summary statistics (`[STATS] Optimization phase complete: ...`) are always shown.
+
+Full per-image detail is always recorded in the CSV report regardless of verbosity level.
 
 ### Status Indicators
 
@@ -542,6 +547,10 @@ Each run generates a detailed CSV report with these columns:
 | `Skipped_NoNetSavings` | No savings achieved or below threshold |
 
 ### Exit Codes
+
+When running via `Optimize-PptImages.ps1`, the script reads the resolved exit code from the module and calls `exit` after the function returns, so the exit code propagates to the calling shell as normal.
+
+When calling `Invoke-PptImageOptimization` directly after importing the module, the function does not call `exit`. The caller's process continues normally. The resolved exit code is stored in `$script:LastFinalExitCode` inside the module scope if you need to inspect it programmatically.
 
 | Code | Meaning |
 |------|---------|
@@ -719,6 +728,8 @@ If optimized file is larger:
 | Small (10 slides, 5 images) | 10-20 seconds |
 | Medium (50 slides, 30 images) | 1-2 minutes |
 | Large (100 slides, 100 images) | 3-5 minutes |
+
+Image probing (transparency analysis, JPEG quality detection) and the ImageMagick resize/convert work both run in parallel across CPU cores. Decks with many images benefit the most from this; the improvement scales with core count.
 
 ### Resource Usage
 
