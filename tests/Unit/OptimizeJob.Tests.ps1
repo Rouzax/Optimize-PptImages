@@ -2,6 +2,90 @@ BeforeAll {
     Import-Module "$PSScriptRoot/../../Optimize-PptImages.psd1" -Force
 }
 
+Describe 'Update-OptimizeProbesParallel' {
+    It 'caches EffectiveTransparencyPercent (~0) for an opaque PNG and SourceJpegQuality (>0) for a JPEG' {
+        InModuleScope Optimize-PptImages {
+            $script:MagickExe = Find-ImageMagick -ProvidedPath $null
+            $dir = Join-Path ([System.IO.Path]::GetTempPath()) "optprobe-$([guid]::NewGuid())"
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            try {
+                $pngPath  = Join-Path $dir 'opaque.png'
+                $jpegPath = Join-Path $dir 'q.jpg'
+                & $script:MagickExe -size 40x30 'xc:red' $pngPath
+                & $script:MagickExe -size 40x30 'xc:red' $jpegPath
+
+                function New-ProbeUsage {
+                    param([string]$Path)
+                    $u = [ImageUsage]::new()
+                    $u.ImagePhysicalPath = $Path
+                    $u.OriginalFileName = (Split-Path $Path -Leaf)
+                    $u.EffectiveTransparencyPercent = -1.0
+                    $u.SourceJpegQuality = -2
+                    return $u
+                }
+
+                $usages = [System.Collections.Generic.List[ImageUsage]]::new()
+                $usages.Add((New-ProbeUsage $pngPath))
+                $usages.Add((New-ProbeUsage $jpegPath))
+
+                Update-OptimizeProbesParallel -usages $usages
+
+                # PNG: transparency percent should be near 0 (opaque image, no alpha pixels)
+                $usages[0].EffectiveTransparencyPercent | Should -BeGreaterOrEqual 0
+                $usages[0].EffectiveTransparencyPercent | Should -BeLessOrEqual 1
+                # PNG: SourceJpegQuality should remain unchanged (not a JPEG)
+                $usages[0].SourceJpegQuality | Should -Be -2
+
+                # JPEG: quality should be set and positive
+                $usages[1].SourceJpegQuality | Should -BeGreaterThan 0
+                # JPEG: EffectiveTransparencyPercent should remain unchanged (not a PNG)
+                $usages[1].EffectiveTransparencyPercent | Should -Be ([double]-1)
+            } finally {
+                Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    It 'tolerates an empty usage list without throwing' {
+        InModuleScope Optimize-PptImages {
+            $script:MagickExe = Find-ImageMagick -ProvidedPath $null
+            $empty = [System.Collections.Generic.List[ImageUsage]]::new()
+            { Update-OptimizeProbesParallel -usages $empty } | Should -Not -Throw
+        }
+    }
+
+    It 'applies probe values to every usage sharing the same physical path' {
+        InModuleScope Optimize-PptImages {
+            $script:MagickExe = Find-ImageMagick -ProvidedPath $null
+            $dir = Join-Path ([System.IO.Path]::GetTempPath()) "optprobe2-$([guid]::NewGuid())"
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            try {
+                $pngPath = Join-Path $dir 'shared.png'
+                & $script:MagickExe -size 40x30 'xc:red' $pngPath
+
+                $usages = [System.Collections.Generic.List[ImageUsage]]::new()
+                foreach ($_ in 1..3) {
+                    $u = [ImageUsage]::new()
+                    $u.ImagePhysicalPath = $pngPath
+                    $u.OriginalFileName = 'shared.png'
+                    $u.EffectiveTransparencyPercent = -1.0
+                    $u.SourceJpegQuality = -2
+                    $usages.Add($u)
+                }
+
+                Update-OptimizeProbesParallel -usages $usages
+
+                # All three usages should have the same transparency value
+                $usages[0].EffectiveTransparencyPercent | Should -BeGreaterOrEqual 0
+                $usages[1].EffectiveTransparencyPercent | Should -Be $usages[0].EffectiveTransparencyPercent
+                $usages[2].EffectiveTransparencyPercent | Should -Be $usages[0].EffectiveTransparencyPercent
+            } finally {
+                Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
 Describe 'OptimizeJob class' {
     It 'constructs and holds the job fields' {
         InModuleScope Optimize-PptImages {

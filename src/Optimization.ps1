@@ -68,6 +68,14 @@
         $totalGroups = $inScopeGroups.Count
         $currentGroup = 0
 
+        # Build a flat list of usages from in-scope groups and run the parallel probe
+        # pre-pass. Probing only in-scope groups preserves work scoping.
+        $inScopeUsages = [System.Collections.Generic.List[ImageUsage]]::new()
+        foreach ($g in $inScopeGroups) {
+            foreach ($u in $g.Usages) { $inScopeUsages.Add($u) }
+        }
+        Update-OptimizeProbesParallel -usages $inScopeUsages
+
         $scratchDir = Join-Path $tempDir '.opt-scratch'
         New-Item -ItemType Directory -Path $scratchDir -Force | Out-Null
 
@@ -120,17 +128,8 @@
             $firstUsage = $hasIncludedUsage | Select-Object -First 1
 
             if ($PSCmdlet.ShouldProcess($mediaFile, "Optimize image")) {
-                # Phase 1 (sequential here; parallelized in a later task): cache probe values.
-                $ext = [System.IO.Path]::GetExtension($group.PhysicalPath).ToLower()
-                if ($ext -in @('.png') -or $ext -in $script:Config.CONVERTIBLE_FORMATS) {
-                    $transp = Get-ImageTransparency -imagePath $group.PhysicalPath
-                    foreach ($u in $group.Usages) { $u.EffectiveTransparencyPercent = $transp }
-                } elseif ($ext -in @('.jpg', '.jpeg')) {
-                    $q = Get-JpegQuality -ImagePath $group.PhysicalPath
-                    foreach ($u in $group.Usages) { $u.SourceJpegQuality = $q }
-                }
-
-                # Phase 2: build a job or set skip statuses.
+                # Probe values were already cached by Update-OptimizeProbesParallel above.
+                # Build a job or set skip statuses.
                 $job = Get-OptimizationJob -group $group -maxDisplay $maxDisplay -scratchDir $scratchDir
                 if (-not $job) {
                     if ($group.Usages[0].OptimizationStatus -match '^(Skipped|NoChange)') { $skippedCount += $group.Usages.Count }
@@ -275,6 +274,98 @@
         }
         
         return $null
+    }
+
+    # Probe each unique media file's transparency percent (for .png and convertible formats)
+    # or JPEG quality (for .jpg/.jpeg) in parallel, then apply cached values to all usages
+    # of that file. Runspaces invoke only magick and return raw strings; parsing is sequential
+    # in the parent. Uses $script:MagickExe. Tolerates an empty usage list (parallel block is
+    # skipped). Progress bar uses Id 5 ("Analyzing images").
+    function Update-OptimizeProbesParallel {
+        param(
+            [System.Collections.Generic.List[ImageUsage]]$usages
+        )
+
+        $magickExe = $script:MagickExe
+        $convertibleFormats = $script:Config.CONVERTIBLE_FORMATS
+
+        # Group by physical path and filter to only files that need probing.
+        $uniqueGroups = @($usages | Group-Object -Property ImagePhysicalPath | Where-Object {
+            $ext = [System.IO.Path]::GetExtension($_.Name).ToLower()
+            $ext -in @('.png', '.jpg', '.jpeg') -or $ext -in $convertibleFormats
+        })
+
+        $rawResults = @()
+        if ($uniqueGroups.Count -gt 0) {
+            # Each runspace invokes only magick and returns a raw PSCustomObject.
+            # The downstream ForEach-Object runs in the parent runspace, increments a
+            # parent-local counter, and renders progress. No shared counter is needed.
+            $total = $uniqueGroups.Count
+            $rawResults = @($uniqueGroups | ForEach-Object {
+                [PSCustomObject]@{ Path = $_.Name; Ext = [System.IO.Path]::GetExtension($_.Name).ToLower() }
+            }) | ForEach-Object -Parallel {
+                $path = $_.Path
+                $ext  = $_.Ext
+                if (-not (Test-Path -LiteralPath $path)) {
+                    [PSCustomObject]@{ Path = $path; Kind = 'none'; Raw = $null }
+                } elseif ($ext -in @('.png', '.bmp', '.tif', '.tiff', '.gif')) {
+                    $out = & $using:magickExe $path -alpha extract -format "%[fx:100*(1-mean)]" info: 2>&1
+                    if ($LASTEXITCODE -ne 0) {
+                        [PSCustomObject]@{ Path = $path; Kind = 'transparency'; Raw = $null }
+                    } else {
+                        if ($out -is [array]) { $out = $out[0] }
+                        [PSCustomObject]@{ Path = $path; Kind = 'transparency'; Raw = "$out" }
+                    }
+                } elseif ($ext -in @('.jpg', '.jpeg')) {
+                    $out = & $using:magickExe identify -format "%Q" $path 2>&1
+                    if ($LASTEXITCODE -ne 0) {
+                        [PSCustomObject]@{ Path = $path; Kind = 'quality'; Raw = $null }
+                    } else {
+                        if ($out -is [array]) { $out = $out[0] }
+                        [PSCustomObject]@{ Path = $path; Kind = 'quality'; Raw = "$out" }
+                    }
+                } else {
+                    [PSCustomObject]@{ Path = $path; Kind = 'none'; Raw = $null }
+                }
+            } -ThrottleLimit ([Environment]::ProcessorCount) | ForEach-Object -Begin { $count = 0 } -Process {
+                $count++
+                Write-Progress -Activity "Analyzing images" -Status "$count of $total" `
+                    -PercentComplete (($count / $total) * 100) -Id 5
+                $_
+            }
+            Write-Progress -Activity "Analyzing images" -Completed -Id 5
+        }
+
+        # Parse results sequentially and apply to all usages sharing each path.
+        $probeMap = @{}
+        foreach ($r in $rawResults) {
+            if ($r.Kind -eq 'transparency') {
+                $raw = $r.Raw
+                if ($raw -and $raw -match '^\d+\.?\d*$') {
+                    $probeMap[$r.Path] = [PSCustomObject]@{ Kind = 'transparency'; Value = [double]$raw }
+                } else {
+                    $probeMap[$r.Path] = [PSCustomObject]@{ Kind = 'transparency'; Value = 0.0 }
+                }
+            } elseif ($r.Kind -eq 'quality') {
+                $raw = $r.Raw
+                if ($raw -and $raw -match '^\d+$') {
+                    $probeMap[$r.Path] = [PSCustomObject]@{ Kind = 'quality'; Value = [int]$raw }
+                } else {
+                    $probeMap[$r.Path] = [PSCustomObject]@{ Kind = 'quality'; Value = -1 }
+                }
+            }
+        }
+
+        foreach ($usage in $usages) {
+            $p = $usage.ImagePhysicalPath
+            if (-not $probeMap.ContainsKey($p)) { continue }
+            $probe = $probeMap[$p]
+            if ($probe.Kind -eq 'transparency') {
+                $usage.EffectiveTransparencyPercent = $probe.Value
+            } elseif ($probe.Kind -eq 'quality') {
+                $usage.SourceJpegQuality = $probe.Value
+            }
+        }
     }
 
     function Get-ImageTransparency {
