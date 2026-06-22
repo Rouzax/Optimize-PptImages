@@ -442,6 +442,247 @@
         return $savingsPercent -ge $MinSavingsPercent
     }
 
+    function Get-OptimizationJob {
+        param(
+            [ImageGroup]$group,
+            [hashtable]$maxDisplay,
+            [string]$scratchDir
+        )
+
+        # Read cached source dimensions from first usage that has them, or first usage as fallback.
+        $knownUsage = $group.Usages | Where-Object { $_.SourceWidthPx -gt 0 } | Select-Object -First 1
+        if (-not $knownUsage) {
+            $knownUsage = $group.Usages[0]
+        }
+        $srcWidth  = $knownUsage.SourceWidthPx
+        $srcHeight = $knownUsage.SourceHeightPx
+
+        # Compute desired display dimensions with headroom, clamped to source dims.
+        $desiredWidth  = [Math]::Ceiling($maxDisplay.Width  * $HeadroomFactor)
+        $desiredHeight = [Math]::Ceiling($maxDisplay.Height * $HeadroomFactor)
+
+        # Background/fill images have no display size; keep source dimensions.
+        if ($desiredWidth -eq 0 -or $desiredHeight -eq 0) {
+            $desiredWidth  = $srcWidth
+            $desiredHeight = $srcHeight
+        }
+
+        $targetWidth  = [Math]::Min($srcWidth,  $desiredWidth)
+        $targetHeight = [Math]::Min($srcHeight, $desiredHeight)
+
+        $ext = [System.IO.Path]::GetExtension($group.PhysicalPath).ToLower()
+
+        # JPEG: check if already at optimal quality and size.
+        if ($ext -in @('.jpg', '.jpeg')) {
+            $sourceQuality = $knownUsage.SourceJpegQuality
+            if ($sourceQuality -gt 0 -and $sourceQuality -le $JpegQuality -and
+                $srcWidth -eq $targetWidth -and $srcHeight -eq $targetHeight) {
+                foreach ($usage in $group.Usages) {
+                    $usage.OptimizationStatus  = 'Skipped_AlreadyOptimal'
+                    $usage.WhyNotOptimized     = "Already at optimal quality (Q$sourceQuality <= Q$JpegQuality) and target size"
+                    $usage.ManualActionRequired = $false
+                }
+                return $null
+            }
+
+            # Build ResizeJpeg job.
+            $outExt     = $ext
+            $scratchPath = Join-Path $scratchDir ("$([guid]::NewGuid())$outExt")
+            $magickArgs = @(
+                $group.PhysicalPath,
+                '-filter', $script:Config.RESIZE_FILTER,
+                '-resize', "${targetWidth}x${targetHeight}>",
+                '-strip',
+                '-quality', $JpegQuality,
+                '-define', 'jpeg:optimize-coding=true',
+                '-define', 'jpeg:dct-method=float',
+                '-sampling-factor', $script:Config.JPEG_SAMPLING_FACTOR_DEFAULT,
+                $scratchPath
+            )
+            $job = [OptimizeJob]::new()
+            $job.GroupKey    = $group.PhysicalPath
+            $job.SourcePath  = $group.PhysicalPath
+            $job.ScratchPath = $scratchPath
+            $job.MagickArgs  = $magickArgs
+            $job.Operation   = 'OptimizeJpeg'
+            $job.StatusName  = 'OptimizeJpeg'
+            $job.BeforeSize  = $group.OriginalSizeBytes
+            $job.NewExtension = ''
+            return $job
+        }
+
+        # Convertible formats (BMP, TIFF, GIF): read cached transparency.
+        if ($ext -in $script:Config.CONVERTIBLE_FORMATS) {
+            $transp = $knownUsage.EffectiveTransparencyPercent
+            if ($transp -gt $TransparencyThresholdPercent) {
+                $outExt = '.png'
+            } else {
+                $outExt = '.jpeg'
+            }
+
+            $scratchPath = Join-Path $scratchDir ("$([guid]::NewGuid())$outExt")
+            $magickArgs = @(
+                $group.PhysicalPath,
+                '-filter', $script:Config.RESIZE_FILTER,
+                '-resize', "${targetWidth}x${targetHeight}>",
+                '-strip'
+            )
+            if ($outExt -eq '.jpeg') {
+                $magickArgs += @(
+                    '-quality', $JpegQuality,
+                    '-define', 'jpeg:optimize-coding=true',
+                    '-define', 'jpeg:dct-method=float',
+                    '-sampling-factor', $script:Config.JPEG_SAMPLING_FACTOR_DEFAULT
+                )
+                $statusName = 'ConvertedToJpeg'
+            } else {
+                $magickArgs += @(
+                    '-define', "png:compression-level=$($script:Config.PNG_COMPRESSION_LEVEL)",
+                    '-define', 'png:color-type=6'
+                )
+                $statusName = 'ConvertedToPng'
+            }
+            $magickArgs += $scratchPath
+
+            $job = [OptimizeJob]::new()
+            $job.GroupKey     = $group.PhysicalPath
+            $job.SourcePath   = $group.PhysicalPath
+            $job.ScratchPath  = $scratchPath
+            $job.MagickArgs   = $magickArgs
+            $job.Operation    = $statusName
+            $job.StatusName   = $statusName
+            $job.BeforeSize   = $group.OriginalSizeBytes
+            $job.NewExtension = $outExt
+            return $job
+        }
+
+        # Already at target size.
+        if ($srcWidth -eq $targetWidth -and $srcHeight -eq $targetHeight) {
+            if ($ext -eq '.png') {
+                $transp = $knownUsage.EffectiveTransparencyPercent
+                if ($transp -le $TransparencyThresholdPercent) {
+                    # Opaque PNG at target size: convert to JPEG without resize.
+                    $outExt      = '.jpeg'
+                    $scratchPath = Join-Path $scratchDir ("$([guid]::NewGuid())$outExt")
+                    $magickArgs  = @(
+                        $group.PhysicalPath,
+                        '-strip',
+                        '-quality', $JpegQuality,
+                        '-define', 'jpeg:optimize-coding=true',
+                        '-define', 'jpeg:dct-method=float',
+                        '-sampling-factor', $script:Config.JPEG_SAMPLING_FACTOR_DEFAULT,
+                        $scratchPath
+                    )
+                    $job = [OptimizeJob]::new()
+                    $job.GroupKey     = $group.PhysicalPath
+                    $job.SourcePath   = $group.PhysicalPath
+                    $job.ScratchPath  = $scratchPath
+                    $job.MagickArgs   = $magickArgs
+                    $job.Operation    = 'ConvertPngToJpeg'
+                    $job.StatusName   = 'ConvertedPngToJpeg'
+                    $job.BeforeSize   = $group.OriginalSizeBytes
+                    $job.NewExtension = '.jpeg'
+                    return $job
+                }
+            }
+
+            # Already at target size and no format conversion needed.
+            foreach ($usage in $group.Usages) {
+                $usage.OptimizationStatus  = 'NoChangeNeeded'
+                $usage.WhyNotOptimized     = 'Already at target size'
+                $usage.ManualActionRequired = $false
+            }
+            return $null
+        }
+
+        # Needs resize.
+        if ($ext -in @('.jpg', '.jpeg')) {
+            # Already handled above; this branch is unreachable but kept for completeness.
+            $outExt      = $ext
+            $scratchPath = Join-Path $scratchDir ("$([guid]::NewGuid())$outExt")
+            $magickArgs  = @(
+                $group.PhysicalPath,
+                '-filter', $script:Config.RESIZE_FILTER,
+                '-resize', "${targetWidth}x${targetHeight}>",
+                '-strip',
+                '-quality', $JpegQuality,
+                '-define', 'jpeg:optimize-coding=true',
+                '-define', 'jpeg:dct-method=float',
+                '-sampling-factor', $script:Config.JPEG_SAMPLING_FACTOR_DEFAULT,
+                $scratchPath
+            )
+            $job = [OptimizeJob]::new()
+            $job.GroupKey     = $group.PhysicalPath
+            $job.SourcePath   = $group.PhysicalPath
+            $job.ScratchPath  = $scratchPath
+            $job.MagickArgs   = $magickArgs
+            $job.Operation    = 'OptimizeJpeg'
+            $job.StatusName   = 'OptimizeJpeg'
+            $job.BeforeSize   = $group.OriginalSizeBytes
+            $job.NewExtension = ''
+            return $job
+        } elseif ($ext -eq '.png') {
+            $transp = $knownUsage.EffectiveTransparencyPercent
+            if ($transp -le $TransparencyThresholdPercent) {
+                # Opaque PNG needing resize: convert to JPEG with resize.
+                $outExt      = '.jpeg'
+                $scratchPath = Join-Path $scratchDir ("$([guid]::NewGuid())$outExt")
+                $magickArgs  = @(
+                    $group.PhysicalPath,
+                    '-filter', $script:Config.RESIZE_FILTER,
+                    '-resize', "${targetWidth}x${targetHeight}>",
+                    '-strip',
+                    '-quality', $JpegQuality,
+                    '-define', 'jpeg:optimize-coding=true',
+                    '-define', 'jpeg:dct-method=float',
+                    '-sampling-factor', $script:Config.JPEG_SAMPLING_FACTOR_DEFAULT,
+                    $scratchPath
+                )
+                $job = [OptimizeJob]::new()
+                $job.GroupKey     = $group.PhysicalPath
+                $job.SourcePath   = $group.PhysicalPath
+                $job.ScratchPath  = $scratchPath
+                $job.MagickArgs   = $magickArgs
+                $job.Operation    = 'ConvertPngToJpeg'
+                $job.StatusName   = 'ConvertedPngToJpeg'
+                $job.BeforeSize   = $group.OriginalSizeBytes
+                $job.NewExtension = '.jpeg'
+                return $job
+            } else {
+                # Transparent PNG needing resize: optimize PNG in place.
+                $outExt      = '.png'
+                $scratchPath = Join-Path $scratchDir ("$([guid]::NewGuid())$outExt")
+                $magickArgs  = @(
+                    $group.PhysicalPath,
+                    '-filter', $script:Config.RESIZE_FILTER,
+                    '-resize', "${targetWidth}x${targetHeight}>",
+                    '-strip',
+                    '-define', "png:compression-level=$($script:Config.PNG_COMPRESSION_LEVEL)",
+                    '-define', 'png:color-type=6',
+                    $scratchPath
+                )
+                $job = [OptimizeJob]::new()
+                $job.GroupKey     = $group.PhysicalPath
+                $job.SourcePath   = $group.PhysicalPath
+                $job.ScratchPath  = $scratchPath
+                $job.MagickArgs   = $magickArgs
+                $job.Operation    = 'OptimizePngAlpha'
+                $job.StatusName   = 'OptimizePngAlpha'
+                $job.BeforeSize   = $group.OriginalSizeBytes
+                $job.NewExtension = ''
+                return $job
+            }
+        } else {
+            # Unsupported format (should have been caught by Get-OptimizationSkipReason).
+            foreach ($usage in $group.Usages) {
+                $usage.OptimizationStatus  = 'Skipped_Other'
+                $usage.WhyNotOptimized     = 'Unsupported format'
+                $usage.ManualActionRequired = $false
+            }
+            return $null
+        }
+    }
+
     function Optimize-Jpeg {
         param(
             [ImageGroup]$group,
