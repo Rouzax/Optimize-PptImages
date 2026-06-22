@@ -19,6 +19,20 @@
         }
     }
 
+    # Parse the output of `magick identify -format "%w %h %[opaque]"` into structured
+    # facts. Pure (no magick invocation) so the parallel scan can call magick in
+    # runspaces and parse the raw strings here, sequentially and unit-testably.
+    function ConvertFrom-MagickFacts {
+        param([string]$Raw)
+
+        $parts = "$Raw".Trim() -split '\s+'
+        return @{
+            Width    = [int]$parts[0]
+            Height   = [int]$parts[1]
+            IsOpaque = ($parts[2] -eq 'True')
+        }
+    }
+
     function Get-JpegQuality {
         param([string]$ImagePath)
 
