@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory=$true, Position=0, ValueFromPipeline=$true, ValueFromPipelineByPropertyName=$true)]
     [Alias('FullName', 'Path')]
     [ValidateScript({
-        if (-not (Test-Path $_)) {
+        if (-not (Test-Path -LiteralPath $_)) {
             throw "Input file not found: $_"
         }
         if ($_ -notmatch '\.(pptx|potx)$') {

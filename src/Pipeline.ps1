@@ -90,7 +90,7 @@
                     Write-Host "`n[INFO] No images found to optimize" -ForegroundColor Yellow
                     
                     # Still create output file and empty CSV
-                    Copy-Item $script:InputFile $script:OutputFile
+                    Copy-Item -LiteralPath $script:InputFile -Destination $script:OutputFile
                     
                     $emptyReport = @()
                     $emptyReport | Export-Csv -Path $script:CsvReport -NoTypeInformation -Encoding UTF8
@@ -106,8 +106,8 @@
                         InputPath = $script:InputFile.ToString()
                         OutputPath = $script:OutputFile
                         ReportPath = $script:CsvReport
-                        OriginalSizeBytes = (Get-Item $script:InputFile).Length
-                        OptimizedSizeBytes = (Get-Item $script:InputFile).Length
+                        OriginalSizeBytes = (Get-Item -LiteralPath $script:InputFile).Length
+                        OptimizedSizeBytes = (Get-Item -LiteralPath $script:InputFile).Length
                         SavingsBytes = 0
                         SavingsPercent = 0.0
                         ImagesCropped = 0
@@ -250,8 +250,8 @@
                 $tempCsvPath = Export-CsvReport -usages $usages -partSlideUsage $partSlideUsage
                 
                 # Final statistics (calculated from temp file)
-                $originalSize = (Get-Item $script:InputFile).Length
-                $optimizedSize = (Get-Item $tempPptxPath).Length
+                $originalSize = (Get-Item -LiteralPath $script:InputFile).Length
+                $optimizedSize = (Get-Item -LiteralPath $tempPptxPath).Length
                 $savedBytes = $originalSize - $optimizedSize
                 $savedPercent = ($savedBytes / $originalSize) * 100
                 

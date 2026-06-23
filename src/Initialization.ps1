@@ -9,7 +9,7 @@
         # Returns: $null on success, or error message string on validation failure
 
         # Resolve paths
-        $script:InputFile = Resolve-Path $InputPath
+        $script:InputFile = Resolve-Path -LiteralPath $InputPath
 
         if (-not $OutputPath) {
             $dir = Split-Path $script:InputFile -Parent
