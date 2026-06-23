@@ -56,9 +56,10 @@ jobs:
       - name: Install Open XML SDK
         shell: pwsh
         run: |
-          Install-PackageProvider -Name NuGet -Force -Scope CurrentUser | Out-Null
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          Get-PackageProvider -Name NuGet -ForceBootstrap | Out-Null
           Register-PackageSource -Name nuget.org -Location https://www.nuget.org/api/v2 -ProviderName NuGet -Trusted -Force -ErrorAction SilentlyContinue
-          Install-Package -Name DocumentFormat.OpenXml -RequiredVersion 3.5.1 -Source nuget.org -Scope CurrentUser -Force | Out-Null
+          Install-Package -Name DocumentFormat.OpenXml -RequiredVersion 3.5.1 -Source nuget.org -ProviderName NuGet -Scope CurrentUser -Force | Out-Null
           Get-Package -Name DocumentFormat.OpenXml.Framework
 
       - name: Import module
