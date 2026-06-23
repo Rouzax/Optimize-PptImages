@@ -31,11 +31,17 @@ jobs:
       # ImageMagick 7 ('magick') is required by the image tests. apt ships ImageMagick 6
       # (no 'magick' command), so install the official IM7 portable binary via AppImage
       # extraction (no FUSE needed on the runner).
+      # Pinned by SHA-256: the upstream URL serves "latest", so verify the download matches
+      # the expected build before executing it. When ImageMagick releases a new version this
+      # check fails loudly; bump MAGICK_SHA256 deliberately after re-verifying. (ImageMagick 7.1.2-25)
       - name: Install ImageMagick (Linux)
         if: runner.os == 'Linux'
+        env:
+          MAGICK_SHA256: af7b861b68adc5957f4b9bb2206c29a0a1d7a89646addb9289e3740e22f9729f
         run: |
           cd /tmp
           wget -q https://imagemagick.org/archive/binaries/magick -O magick
+          echo "$MAGICK_SHA256  magick" | sha256sum -c -
           chmod +x magick
           ./magick --appimage-extract > /dev/null
           sudo mv squashfs-root /opt/imagemagick
@@ -46,7 +52,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install imagemagick.app --no-progress -y
+          choco install imagemagick.app --version 7.1.2.2500 --no-progress -y
           Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
           refreshenv
           magick --version
