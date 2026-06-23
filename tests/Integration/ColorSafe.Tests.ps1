@@ -49,6 +49,20 @@ Describe 'Color-safe optimize of a non-sRGB image' {
             # Output is sRGB and stripped (no embedded profile).
             (& $magick identify -format '%[profile:icc]' $out) | Should -BeNullOrEmpty
             (& $magick identify -format '%[colorspace]' $out) | Should -Be 'sRGB'
+
+            # Prove the transform is color-managed, not a naive strip: $out must be closer
+            # (lower MAE) to the color-managed reference than to the naive-strip reference.
+            # Resize both references to $out's actual dimensions so the comparison is valid.
+            $outDims      = (& $magick identify -format '%wx%h' $out).Trim()
+            $refResized   = Join-Path $dir 'ref_resized.jpg'
+            $wrongResized = Join-Path $dir 'wrong_resized.jpg'
+            & $magick $ref   -resize "${outDims}!" $refResized   | Out-Null
+            & $magick $wrong -resize "${outDims}!" $wrongResized | Out-Null
+            $rawRef   = [string](& $magick compare -metric MAE $out $refResized   null: 2>&1)
+            $rawWrong = [string](& $magick compare -metric MAE $out $wrongResized null: 2>&1)
+            $maeRef   = [double](($rawRef   -split '\s+')[0])
+            $maeWrong = [double](($rawWrong -split '\s+')[0])
+            $maeRef | Should -BeLessThan $maeWrong
         } finally { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
