@@ -390,7 +390,7 @@
         if ($allUniquePaths.Count -gt 0) {
             $colorResults = @($allUniquePaths) | ForEach-Object -Parallel {
                 $path = $_
-                $out = & $using:magickExe identify -format "%[colorspace]`n%[profile:icc]" $path 2>&1
+                $out = & $using:magickExe identify -format "%[colorspace]`n%[profile:icc]" $path 2>$null
                 [PSCustomObject]@{ Path = $path; Kind = 'color'; Raw = $out }
             } -ThrottleLimit ([Environment]::ProcessorCount)
         }

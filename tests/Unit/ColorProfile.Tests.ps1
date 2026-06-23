@@ -74,6 +74,11 @@ Describe 'Get-OptimizationJob sRGB conversion' {
 Describe 'Update-OptimizeProbesParallel color detection' {
     It 'flags an Adobe RGB image and leaves an sRGB image unflagged' {
         InModuleScope Optimize-PptImages {
+            $adobeProfile = '/usr/share/color/icc/colord/AdobeRGB1998.icc'
+            if (-not (Test-Path -LiteralPath $adobeProfile)) {
+                Set-ItResult -Skipped -Because 'system AdobeRGB profile not available to build the non-sRGB test input'
+                return
+            }
             $script:MagickExe = Find-ImageMagick -ProvidedPath $null
             $dir = Join-Path ([System.IO.Path]::GetTempPath()) "color-$([guid]::NewGuid())"
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -82,7 +87,7 @@ Describe 'Update-OptimizeProbesParallel color detection' {
                 $adobe = Join-Path $dir 'adobe.jpg'
                 & $script:MagickExe -size 40x30 'xc:red' $srgb
                 & $script:MagickExe -size 40x30 'xc:red' -profile $script:SrgbProfilePath $srgb    # ensure plain sRGB-ish
-                & $script:MagickExe -size 40x30 'xc:red' -profile '/usr/share/color/icc/colord/AdobeRGB1998.icc' $adobe
+                & $script:MagickExe -size 40x30 'xc:red' -profile $adobeProfile $adobe
                 $usages = [System.Collections.Generic.List[ImageUsage]]::new()
                 foreach ($p in @($srgb, $adobe)) {
                     $u = [ImageUsage]::new(); $u.ImagePhysicalPath = $p; $u.OriginalFileName = (Split-Path $p -Leaf)
@@ -91,6 +96,54 @@ Describe 'Update-OptimizeProbesParallel color detection' {
                 Update-OptimizeProbesParallel -usages $usages
                 ($usages | Where-Object { $_.ImagePhysicalPath -eq $adobe }).NeedsSrgbConversion | Should -BeTrue
                 ($usages | Where-Object { $_.ImagePhysicalPath -eq $srgb }).NeedsSrgbConversion  | Should -BeFalse
+            } finally { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+    It 'untagged grayscale image is not flagged for sRGB conversion' {
+        InModuleScope Optimize-PptImages {
+            $script:MagickExe = Find-ImageMagick -ProvidedPath $null
+            $dir = Join-Path ([System.IO.Path]::GetTempPath()) "color-$([guid]::NewGuid())"
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            try {
+                $gray = Join-Path $dir 'u_gray.png'
+                & $script:MagickExe -size 20x20 'xc:gray50' -colorspace Gray $gray
+                $usages = [System.Collections.Generic.List[ImageUsage]]::new()
+                $u = [ImageUsage]::new(); $u.ImagePhysicalPath = $gray; $u.OriginalFileName = (Split-Path $gray -Leaf)
+                $usages.Add($u)
+                Update-OptimizeProbesParallel -usages $usages
+                $usages[0].NeedsSrgbConversion | Should -BeFalse
+            } finally { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+    It 'untagged sRGB image is not flagged for sRGB conversion' {
+        InModuleScope Optimize-PptImages {
+            $script:MagickExe = Find-ImageMagick -ProvidedPath $null
+            $dir = Join-Path ([System.IO.Path]::GetTempPath()) "color-$([guid]::NewGuid())"
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            try {
+                $srgb = Join-Path $dir 'u_srgb.png'
+                & $script:MagickExe -size 20x20 'xc:red' $srgb
+                $usages = [System.Collections.Generic.List[ImageUsage]]::new()
+                $u = [ImageUsage]::new(); $u.ImagePhysicalPath = $srgb; $u.OriginalFileName = (Split-Path $srgb -Leaf)
+                $usages.Add($u)
+                Update-OptimizeProbesParallel -usages $usages
+                $usages[0].NeedsSrgbConversion | Should -BeFalse
+            } finally { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+    It 'untagged CMYK image is flagged for sRGB conversion' {
+        InModuleScope Optimize-PptImages {
+            $script:MagickExe = Find-ImageMagick -ProvidedPath $null
+            $dir = Join-Path ([System.IO.Path]::GetTempPath()) "color-$([guid]::NewGuid())"
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            try {
+                $cmyk = Join-Path $dir 'u_cmyk.jpg'
+                & $script:MagickExe -size 20x20 'xc:red' -colorspace CMYK $cmyk
+                $usages = [System.Collections.Generic.List[ImageUsage]]::new()
+                $u = [ImageUsage]::new(); $u.ImagePhysicalPath = $cmyk; $u.OriginalFileName = (Split-Path $cmyk -Leaf)
+                $usages.Add($u)
+                Update-OptimizeProbesParallel -usages $usages
+                $usages[0].NeedsSrgbConversion | Should -BeTrue
             } finally { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
         }
     }
