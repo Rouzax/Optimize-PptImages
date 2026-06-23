@@ -529,6 +529,13 @@
 
         $ext = [System.IO.Path]::GetExtension($group.PhysicalPath).ToLower()
 
+        # Determine whether a color-managed sRGB conversion is needed before stripping.
+        $needsSrgb = $group.Usages[0].NeedsSrgbConversion
+        if ($needsSrgb) {
+            Write-Verbose "  Converting non-sRGB to sRGB for $($group.Usages[0].OriginalFileName)"
+        }
+        $srgbArgs = if ($needsSrgb) { @('-profile', $script:SrgbProfilePath) } else { @() }
+
         # JPEG: check if already at optimal quality and size.
         if ($ext -in @('.jpg', '.jpeg')) {
             $sourceQuality = $knownUsage.SourceJpegQuality
@@ -548,7 +555,8 @@
             $magickArgs = @(
                 $group.PhysicalPath,
                 '-filter', $script:Config.RESIZE_FILTER,
-                '-resize', "${targetWidth}x${targetHeight}>",
+                '-resize', "${targetWidth}x${targetHeight}>"
+            ) + $srgbArgs + @(
                 '-strip',
                 '-quality', $JpegQuality,
                 '-define', 'jpeg:optimize-coding=true',
@@ -584,9 +592,8 @@
             $magickArgs = @(
                 $group.PhysicalPath,
                 '-filter', $script:Config.RESIZE_FILTER,
-                '-resize', "${targetWidth}x${targetHeight}>",
-                '-strip'
-            )
+                '-resize', "${targetWidth}x${targetHeight}>"
+            ) + $srgbArgs + @('-strip')
             if ($outExt -eq '.jpeg') {
                 $magickArgs += @(
                     '-quality', $JpegQuality,
@@ -624,8 +631,7 @@
                     # Opaque PNG at target size: convert to JPEG without resize.
                     $outExt      = '.jpeg'
                     $scratchPath = Join-Path $scratchDir ("$([guid]::NewGuid())$outExt")
-                    $magickArgs  = @(
-                        $group.PhysicalPath,
+                    $magickArgs  = @($group.PhysicalPath) + $srgbArgs + @(
                         '-strip',
                         '-quality', $JpegQuality,
                         '-define', 'jpeg:optimize-coding=true',
@@ -665,7 +671,8 @@
                 $magickArgs  = @(
                     $group.PhysicalPath,
                     '-filter', $script:Config.RESIZE_FILTER,
-                    '-resize', "${targetWidth}x${targetHeight}>",
+                    '-resize', "${targetWidth}x${targetHeight}>"
+                ) + $srgbArgs + @(
                     '-strip',
                     '-quality', $JpegQuality,
                     '-define', 'jpeg:optimize-coding=true',
@@ -690,7 +697,8 @@
                 $magickArgs  = @(
                     $group.PhysicalPath,
                     '-filter', $script:Config.RESIZE_FILTER,
-                    '-resize', "${targetWidth}x${targetHeight}>",
+                    '-resize', "${targetWidth}x${targetHeight}>"
+                ) + $srgbArgs + @(
                     '-strip',
                     '-define', "png:compression-level=$($script:Config.PNG_COMPRESSION_LEVEL)",
                     '-define', 'png:color-type=6',

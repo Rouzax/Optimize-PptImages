@@ -24,6 +24,53 @@ Describe 'bundled sRGB profile' {
     }
 }
 
+Describe 'Get-OptimizationJob sRGB conversion' {
+    It 'inserts -profile before -strip for a flagged JPEG' {
+        InModuleScope Optimize-PptImages {
+            $HeadroomFactor = 2.0; $JpegQuality = 95; $TransparencyThresholdPercent = 0.1
+            function New-ColGrp {
+                param($Path, $SrcW, $SrcH, $DispW, $DispH, $Bytes, $NeedsSrgb)
+                $u = [ImageUsage]::new()
+                $u.ImagePhysicalPath = $Path; $u.OriginalFileName = (Split-Path $Path -Leaf)
+                $u.ContextType = [ContextType]::Slide; $u.SlideNumber = 1
+                $u.SourceWidthPx = $SrcW; $u.SourceHeightPx = $SrcH
+                $u.DisplayWidthPx = $DispW; $u.DisplayHeightPx = $DispH
+                $u.EffectiveTransparencyPercent = 0; $u.SourceJpegQuality = 90
+                $u.NeedsSrgbConversion = $NeedsSrgb; $u.OptimizationStatus = 'Pending'
+                $g = [ImageGroup]::new(); $g.PhysicalPath = $Path; $g.OriginalSizeBytes = $Bytes; $g.Usages.Add($u)
+                return $g
+            }
+            $g = New-ColGrp '/tmp/x/a.jpeg' 4000 3000 800 600 500000 $true
+            $job = Get-OptimizationJob -group $g -maxDisplay @{ Width=800; Height=600 } -scratchDir '/tmp/s'
+            $args = $job.MagickArgs
+            $pi = [array]::IndexOf($args, '-profile'); $si = [array]::IndexOf($args, '-strip')
+            $pi | Should -BeGreaterThan -1
+            $args[$pi + 1] | Should -Be $script:SrgbProfilePath
+            $pi | Should -BeLessThan $si    # -profile comes before -strip
+        }
+    }
+    It 'does not add -profile for an unflagged (sRGB) JPEG' {
+        InModuleScope Optimize-PptImages {
+            $HeadroomFactor = 2.0; $JpegQuality = 95; $TransparencyThresholdPercent = 0.1
+            function New-ColGrp {
+                param($Path, $SrcW, $SrcH, $DispW, $DispH, $Bytes, $NeedsSrgb)
+                $u = [ImageUsage]::new()
+                $u.ImagePhysicalPath = $Path; $u.OriginalFileName = (Split-Path $Path -Leaf)
+                $u.ContextType = [ContextType]::Slide; $u.SlideNumber = 1
+                $u.SourceWidthPx = $SrcW; $u.SourceHeightPx = $SrcH
+                $u.DisplayWidthPx = $DispW; $u.DisplayHeightPx = $DispH
+                $u.EffectiveTransparencyPercent = 0; $u.SourceJpegQuality = 90
+                $u.NeedsSrgbConversion = $NeedsSrgb; $u.OptimizationStatus = 'Pending'
+                $g = [ImageGroup]::new(); $g.PhysicalPath = $Path; $g.OriginalSizeBytes = $Bytes; $g.Usages.Add($u)
+                return $g
+            }
+            $g = New-ColGrp '/tmp/x/b.jpeg' 4000 3000 800 600 500000 $false
+            $job = Get-OptimizationJob -group $g -maxDisplay @{ Width=800; Height=600 } -scratchDir '/tmp/s'
+            ([array]::IndexOf($job.MagickArgs, '-profile')) | Should -Be -1
+        }
+    }
+}
+
 Describe 'Update-OptimizeProbesParallel color detection' {
     It 'flags an Adobe RGB image and leaves an sRGB image unflagged' {
         InModuleScope Optimize-PptImages {
