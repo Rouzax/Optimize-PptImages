@@ -197,10 +197,12 @@
         # Iterate usages in the existing order. Silent slide-filter skips and the
         # ShouldProcess gate are honored here. For each usage with HasSrcRect that is
         # in scope, call Get-CropJob. Null results are tallied and messaged immediately.
-        # Non-null jobs are collected for the parallel run; each is paired with its
-        # usage so the commit pass can look up results by Key and iterate in usage order.
+        # Non-null jobs are collected for the parallel run. $jobs holds one leader per
+        # unique CropKey; $usageJobPairs pairs every in-scope usage with its CropKey so
+        # the commit pass can look up results and iterate in usage order.
         $jobs = [System.Collections.Generic.List[CropJob]]::new()
         $usageJobPairs = [System.Collections.Generic.List[PSCustomObject]]::new()
+        $cropKeyToLeader = @{}
 
         foreach ($usage in $usages) {
             if (-not $usage.HasSrcRect) { continue }
@@ -273,8 +275,11 @@
 
             # ShouldProcess gate: only collect the job when the operation is confirmed.
             if ($PSCmdlet.ShouldProcess("$($usage.ShapeName) on $($usage.Location)", "Crop image")) {
-                $jobs.Add($job)
-                $usageJobPairs.Add([PSCustomObject]@{ Usage = $usage; Job = $job })
+                if (-not $cropKeyToLeader.ContainsKey($job.CropKey)) {
+                    $cropKeyToLeader[$job.CropKey] = $job
+                    $jobs.Add($job)
+                }
+                $usageJobPairs.Add([PSCustomObject]@{ Usage = $usage; CropKey = $job.CropKey })
             }
         }
 
@@ -287,21 +292,37 @@
 
         # --- COMMIT PASS ---
         # Iterate usageJobPairs in the same order they were added (usage order).
-        # Look up each job's result, call Complete-CropJob, and tally.
+        # Each unique CropKey is allocated a shared media file on first encounter;
+        # subsequent usages with the same CropKey reuse that file.
         # A missing result key is treated as success=$false.
+        $cropKeyToMedia = @{}
         foreach ($pair in $usageJobPairs) {
-            $job = $pair.Job
-            $result = $jobResults[$job.Key]
+            $usage   = $pair.Usage
+            $cropKey = $pair.CropKey
+            $leader  = $cropKeyToLeader[$cropKey]
+            $result  = $jobResults[$leader.Key]
             $ran       = $result -ne $null
             $success   = $ran -and $result.Success
             $afterSize = if ($ran) { $result.AfterSize } else { 0 }
 
-            $commitResult = Complete-CropJob -job $job -scratchPath $job.ScratchPath -success $success -afterSize $afterSize -tempDir $tempDir
-            if ($commitResult.Success) {
-                $croppedCount++
-            } else {
+            if (-not $success) {
+                $usage.OptimizationStatus = 'Skipped_CropInvalidOrUnsafe'
+                $usage.WhyNotOptimized    = 'Crop operation failed'
+                Write-Warning "Crop failed for '$($usage.ShapeName)' on $($usage.Location)"
                 $skippedCount++
+                continue
             }
+
+            if (-not $cropKeyToMedia.ContainsKey($cropKey)) {
+                $out = New-UniqueMediaPath -basePath $leader.SourcePath -suffix '_cropped'
+                Move-Item -LiteralPath $leader.ScratchPath $out.Path -Force
+                $cropKeyToMedia[$cropKey] = $out
+            }
+            $shared = $cropKeyToMedia[$cropKey]
+
+            Complete-CropUsage -usage $usage -sharedMediaName $shared.Name -sharedMediaPath $shared.Path `
+                -beforeSize $leader.BeforeSize -afterSize $afterSize -tempDir $tempDir
+            $croppedCount++
         }
 
         if (Test-Path -LiteralPath $scratchDir) {
@@ -497,6 +518,7 @@
 
         $job = [CropJob]::new()
         $job.Key         = "$($usage.PartPath)|$($usage.ShapeName)|$($usage.BlipRId)"
+        $job.CropKey     = "$($usage.ImagePhysicalPath)|$cropGeometry"
         $job.SourcePath  = $usage.ImagePhysicalPath
         $job.ScratchPath = $scratchPath
         $job.MagickArgs  = @($usage.ImagePhysicalPath, '-crop', $cropGeometry, '+repage', $scratchPath)
@@ -506,58 +528,35 @@
         return $job
     }
 
-    function Complete-CropJob {
+    function Complete-CropUsage {
         param(
-            [CropJob]$job,
-            [string]$scratchPath,
-            [bool]$success,
+            [object]$usage,
+            [string]$sharedMediaName,
+            [string]$sharedMediaPath,
+            [long]$beforeSize,
             [long]$afterSize,
             [string]$tempDir
         )
 
-        if (-not $success) {
-            $job.Usage.OptimizationStatus = 'Skipped_CropInvalidOrUnsafe'
-            $job.Usage.WhyNotOptimized    = 'Crop operation failed'
-            Write-Warning "Crop failed for '$($job.Usage.ShapeName)' on $($job.Usage.Location)"
-            return @{ Success = $false }
-        }
+        $u = $usage
+        $null = Update-BlipRelationship -usage $u -tempDir $tempDir -newMediaFileName $sharedMediaName
 
-        $u = $job.Usage
-
-        $out = New-UniqueMediaPath -basePath $u.ImagePhysicalPath -suffix '_cropped'
-        Move-Item -LiteralPath $scratchPath $out.Path -Force
-        $null = Update-BlipRelationship -usage $u -tempDir $tempDir -newMediaFileName $out.Name
-
-        # Remove srcRect (sibling of blip within blipFill)
         $blipFill = $u.BlipElement.ParentNode
         if ($blipFill) {
             $srcRect = $blipFill.SelectSingleNode('a:srcRect', $script:NsMgr)
-            if ($srcRect) {
-                $null = $srcRect.ParentNode.RemoveChild($srcRect)
-            }
-
-            # Also reset fillRect if it has negative values (stretch crop)
-            # The crop has been materialized, so fillRect should be reset to no offset
+            if ($srcRect) { $null = $srcRect.ParentNode.RemoveChild($srcRect) }
             $stretch = $blipFill.SelectSingleNode('a:stretch', $script:NsMgr)
             if ($stretch) {
                 $fillRect = $stretch.SelectSingleNode('a:fillRect', $script:NsMgr)
                 if ($fillRect) {
-                    # Check if any attributes were negative (indicating crop)
                     $hasNegative = $false
                     foreach ($attr in @('l', 't', 'r', 'b')) {
                         $val = $fillRect.GetAttribute($attr)
-                        if ($val -and [double]$val -lt 0) {
-                            $hasNegative = $true
-                            break
-                        }
+                        if ($val -and [double]$val -lt 0) { $hasNegative = $true; break }
                     }
-
                     if ($hasNegative) {
-                        # Remove all attributes to reset to default (no offset)
-                        $fillRect.RemoveAttribute('l')
-                        $fillRect.RemoveAttribute('t')
-                        $fillRect.RemoveAttribute('r')
-                        $fillRect.RemoveAttribute('b')
+                        $fillRect.RemoveAttribute('l'); $fillRect.RemoveAttribute('t')
+                        $fillRect.RemoveAttribute('r'); $fillRect.RemoveAttribute('b')
                         Write-Verbose "    Reset fillRect attributes (crop materialized into image)"
                     }
                 }
@@ -567,14 +566,11 @@
         $u.HasSrcRect        = $false
         $u.CropApplied       = $true
         $u.AfterSizeBytes    = $afterSize
-        $u.OptimizedFile     = $out.Name
-        $u.ImagePhysicalPath = $out.Path
+        $u.OptimizedFile     = $sharedMediaName
+        $u.ImagePhysicalPath = $sharedMediaPath
 
-        $beforeSize    = $job.BeforeSize
-        $savedPercent  = if ($beforeSize -gt 0) { (($beforeSize - $afterSize) / $beforeSize) * 100 } else { 0 }
+        $savedPercent = if ($beforeSize -gt 0) { (($beforeSize - $afterSize) / $beforeSize) * 100 } else { 0 }
         Write-Verbose "   [CROP] Cropped '$($u.ShapeName)' on $($u.Location) (saved $($savedPercent.ToString('F1'))%)"
-
-        return @{ Success = $true }
     }
 
     #endregion

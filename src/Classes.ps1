@@ -87,6 +87,7 @@
 
     class CropJob {
         [string]$Key
+        [string]$CropKey
         [string]$SourcePath
         [string]$ScratchPath
         [string[]]$MagickArgs

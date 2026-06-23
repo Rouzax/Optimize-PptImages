@@ -360,6 +360,14 @@ try {
             -SrcLeft 15000 -SrcTop 5000 -SrcRight 15000 -SrcBottom 5000 `
             -FillLeft (-20000) `
         ))
+
+        # Shape D: identical srcRect to Shape A on the same shared image -> dedup target
+        # (must materialize as the SAME file as Shape A, not a second copy).
+        [void]$slideCsd.SpTree.Append((New-PictureShapeWithCrop `
+            -ShapeId 7 -ShapeName 'Crop Dedup' -EmbedRelId $imgRelIdCrop `
+            -OffsetXEmu 914400 -OffsetYEmu 5029200 `
+            -SrcLeft 10000 -SrcTop 10000 -SrcRight 10000 -SrcBottom 10000 `
+        ))
     }
 
     $slidePart.Slide = $slide

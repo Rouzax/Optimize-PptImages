@@ -87,8 +87,8 @@ Describe 'Get-CropJob decisions' {
     }
 }
 
-Describe 'Complete-CropJob' {
-    It 'on success: moves scratch, updates path, sets CropApplied, removes srcRect' {
+Describe 'Complete-CropUsage' {
+    It 'wires usage to shared file: sets CropApplied, removes srcRect, resets negative fillRect' {
         InModuleScope Optimize-PptImages {
             Initialize-Namespaces
 
@@ -100,9 +100,10 @@ Describe 'Complete-CropJob' {
                 $media = Join-Path $dir 'ppt/media/image1.png'
                 Set-Content -LiteralPath $media -Value 'original-bytes'
 
-                # Create a scratch file (simulates the already-produced cropped image)
-                $scratch = Join-Path $dir 'scratch.png'
-                Set-Content -LiteralPath $scratch -Value 'cropped-bytes'
+                # Create the shared (already-moved) cropped file that the commit pass provides
+                $sharedPath = Join-Path $dir 'ppt/media/image1_cropped.png'
+                Set-Content -LiteralPath $sharedPath -Value 'cropped-bytes'
+                $sharedName = 'image1_cropped.png'
 
                 # Build a minimal rels file so Update-BlipRelationship can find it
                 $relsPath = Join-Path $dir 'ppt/slides/_rels/slide1.xml.rels'
@@ -148,26 +149,18 @@ Describe 'Complete-CropJob' {
                 $u.ShapeName         = 'TestShape'
                 $u.Location          = 'Slide 1'
 
-                # Build the CropJob
-                $job = [CropJob]::new()
-                $job.Key         = 'ppt/slides/slide1.xml|TestShape|rId1'
-                $job.SourcePath  = $media
-                $job.ScratchPath = $scratch
-                $job.BeforeSize  = $u.BeforeSizeBytes
-                $job.Usage       = $u
+                $beforeSize = $u.BeforeSizeBytes
+                $afterSize  = (Get-Item $sharedPath).Length
+                Complete-CropUsage -usage $u -sharedMediaName $sharedName -sharedMediaPath $sharedPath `
+                    -beforeSize $beforeSize -afterSize $afterSize -tempDir $dir
 
-                $afterSize = (Get-Item $scratch).Length
-                $r = Complete-CropJob -job $job -scratchPath $scratch -success $true -afterSize $afterSize -tempDir $dir
-
-                $r.Success          | Should -BeTrue
-                $u.CropApplied      | Should -BeTrue
-                $u.HasSrcRect       | Should -BeFalse
-                $u.AfterSizeBytes   | Should -Be $afterSize
-                $u.OptimizedFile    | Should -BeLike '*_cropped*'
-                # ImagePhysicalPath must point to the new cropped file
-                $u.ImagePhysicalPath | Should -BeLike '*_cropped*'
+                $u.CropApplied       | Should -BeTrue
+                $u.HasSrcRect        | Should -BeFalse
+                $u.AfterSizeBytes    | Should -Be $afterSize
+                $u.OptimizedFile     | Should -BeLike '*_cropped*'
+                # ImagePhysicalPath must point to the shared cropped file
+                $u.ImagePhysicalPath | Should -Be $sharedPath
                 (Test-Path -LiteralPath $u.ImagePhysicalPath) | Should -BeTrue
-                # The original media file must no longer exist (was not renamed; a new name is created)
                 # srcRect must have been removed from the blipFill
                 $blipFill.SelectSingleNode('a:srcRect', $script:NsMgr) | Should -BeNullOrEmpty
                 # fillRect negative attrs should have been reset
@@ -177,25 +170,6 @@ Describe 'Complete-CropJob' {
             } finally {
                 Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
             }
-        }
-    }
-
-    It 'on failure: sets Skipped_CropInvalidOrUnsafe and returns Success=false' {
-        InModuleScope Optimize-PptImages {
-            $u = [ImageUsage]::new()
-            $u.ImagePhysicalPath = '/tmp/x/img.png'
-            $u.ShapeName         = 'Fail'
-            $u.Location          = 'Slide 1'
-
-            $job = [CropJob]::new()
-            $job.Key     = 'k'
-            $job.Usage   = $u
-            $job.BeforeSize = 0
-
-            $r = Complete-CropJob -job $job -scratchPath '' -success $false -afterSize 0 -tempDir '/tmp'
-            $r.Success                 | Should -BeFalse
-            $u.OptimizationStatus      | Should -Be 'Skipped_CropInvalidOrUnsafe'
-            $u.WhyNotOptimized         | Should -Be 'Crop operation failed'
         }
     }
 }
