@@ -64,6 +64,7 @@
                 } else {
                     # Extract (use .NET ZipFile; Expand-Archive only accepts .zip extension)
                     Add-Type -Assembly 'System.IO.Compression.FileSystem' -ErrorAction SilentlyContinue
+                    Write-Host "[UNPACK] Extracting presentation..." -ForegroundColor Cyan
                     [System.IO.Compression.ZipFile]::ExtractToDirectory($script:InputFile, $tempDir)
 
                     # Scan (canonical slide order, slide dimensions, image usages)

@@ -376,7 +376,6 @@
                     -PercentComplete (($count / $total) * 100) -Id 5
                 $_
             }
-            Write-Progress -Activity "Analyzing images" -Completed -Id 5
         }
 
         # Color probe: run for every unique image regardless of format. The identify call reads
@@ -388,12 +387,19 @@
 
         $colorResults = @()
         if ($allUniquePaths.Count -gt 0) {
+            $colorTotal = $allUniquePaths.Count
             $colorResults = @($allUniquePaths) | ForEach-Object -Parallel {
                 $path = $_
                 $out = & $using:magickExe identify -format "%[colorspace]`n%[profile:icc]" $path 2>$null
                 [PSCustomObject]@{ Path = $path; Kind = 'color'; Raw = $out }
-            } -ThrottleLimit ([Environment]::ProcessorCount)
+            } -ThrottleLimit ([Environment]::ProcessorCount) | ForEach-Object -Begin { $colorCount = 0 } -Process {
+                $colorCount++
+                Write-Progress -Activity "Analyzing images" -Status "Color profiles $colorCount of $colorTotal" `
+                    -PercentComplete (($colorCount / $colorTotal) * 100) -Id 5
+                $_
+            }
         }
+        Write-Progress -Activity "Analyzing images" -Completed -Id 5
 
         # Parse results sequentially and apply to all usages sharing each path.
         $probeMap = @{}
