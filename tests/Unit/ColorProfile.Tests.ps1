@@ -73,12 +73,12 @@ Describe 'Get-OptimizationJob sRGB conversion' {
 
 Describe 'Update-OptimizeProbesParallel color detection' {
     It 'flags an Adobe RGB image and leaves an sRGB image unflagged' {
-        InModuleScope Optimize-PptImages {
-            $adobeProfile = '/usr/share/color/icc/colord/AdobeRGB1998.icc'
-            if (-not (Test-Path -LiteralPath $adobeProfile)) {
-                Set-ItResult -Skipped -Because 'system AdobeRGB profile not available to build the non-sRGB test input'
-                return
-            }
+        # Bundled non-sRGB profile so this runs on every platform (Linux/Windows CI).
+        # Resolve in the test scope ($PSScriptRoot = tests/Unit) and pass into InModuleScope,
+        # where $PSScriptRoot would otherwise point at the module root.
+        $adobeProfile = Join-Path $PSScriptRoot '../fixtures/AdobeRGB1998.icc'
+        InModuleScope Optimize-PptImages -Parameters @{ adobeProfile = $adobeProfile } {
+            param($adobeProfile)
             $script:MagickExe = Find-ImageMagick -ProvidedPath $null
             $dir = Join-Path ([System.IO.Path]::GetTempPath()) "color-$([guid]::NewGuid())"
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
