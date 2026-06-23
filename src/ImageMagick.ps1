@@ -33,6 +33,16 @@
         }
     }
 
+    # Pure decision: does this image need a color-managed conversion to sRGB before -strip?
+    # True for CMYK, or for an embedded ICC profile whose description is not sRGB. Untagged
+    # and sRGB/grayscale images return false (strip as today is safe for them).
+    function Test-NeedsSrgbConversion {
+        param([string]$Colorspace, [string]$IccDescription)
+        if ($Colorspace -eq 'CMYK') { return $true }
+        if ($IccDescription -and $IccDescription.Trim() -ne '' -and $IccDescription -notmatch '(?i)sRGB') { return $true }
+        return $false
+    }
+
     function Get-JpegQuality {
         param([string]$ImagePath)
 

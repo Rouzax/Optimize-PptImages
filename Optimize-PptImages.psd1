@@ -6,6 +6,7 @@
     Description       = 'Optimize PowerPoint images: resize, materialize crops, convert formats, clean unused parts.'
     PowerShellVersion = '7.0'
     FunctionsToExport = @('Invoke-PptImageOptimization')
+    FileList          = @('resources/sRGB.icc')
     CmdletsToExport   = @()
     VariablesToExport = @()
     AliasesToExport   = @()

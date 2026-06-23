@@ -1,6 +1,8 @@
 #Requires -Version 7.0
 Set-StrictMode -Version Latest
 
+$script:SrgbProfilePath = Join-Path $PSScriptRoot 'resources/sRGB.icc'
+
 . $PSScriptRoot/src/Config.ps1
 . $PSScriptRoot/src/Classes.ps1
 . $PSScriptRoot/src/Common.ps1
