@@ -29,6 +29,7 @@ A cross-platform PowerShell script that intelligently optimizes PowerPoint prese
     - [Display Size vs Physical Size](#display-size-vs-physical-size)
     - [Cropping in PowerPoint](#cropping-in-powerpoint)
     - [Format Conversion](#format-conversion)
+    - [Color Profile Handling](#color-profile-handling)
     - [Shared Images](#shared-images)
     - [Masters and Layouts](#masters-and-layouts)
     - [Morph Transition Protection](#morph-transition-protection)
@@ -98,6 +99,7 @@ Get-ChildItem *.pptx | .\Optimize-PptImages.ps1 -OptimizeSlides -CropSlides
 
 - **Transparency analysis** -- Detects actual transparent pixels (not just alpha channel presence)
 - **JPEG quality preservation** -- Avoids recompression when source quality is already optimal
+- **Color profile safety** -- Images tagged with a non-sRGB ICC profile (such as AdobeRGB or ProPhoto) or in the CMYK colorspace are converted to sRGB before metadata is stripped, so colors render correctly in PowerPoint after optimization. Plain sRGB and untagged images are not affected.
 - **Morph transition protection** -- Preserves linked images across Morph slide pairs
 - **Shared image awareness** -- Uses maximum display size across all usages
 - **Minimum savings threshold** -- Skip optimizations below configurable savings percentage
@@ -376,6 +378,16 @@ The script intelligently converts formats when beneficial:
 | GIF (animated) | *Skipped* | Would break animation |
 
 **Transparency Analysis:** The script counts actual transparent pixels, not just alpha channel presence. A PNG with an alpha channel but no actual transparency gets converted to JPEG.
+
+### Color Profile Handling
+
+When the optimize phase strips image metadata (EXIF, comments, and embedded profiles), it first checks the color profile of every image it processes:
+
+- **Non-sRGB or CMYK:** If an image carries a non-sRGB ICC profile (for example AdobeRGB, ProPhoto, or any custom print profile) or is in the CMYK colorspace, the script converts it to sRGB before stripping. This is done by passing `-profile <bundled sRGB.icc>` to ImageMagick immediately before `-strip`, so the color values in the output file match what you see in PowerPoint.
+- **Plain sRGB or untagged:** No conversion happens. The strip removes the profile tag as before. Colors are already in the display colorspace, so nothing changes visually.
+- **Crop phase:** The crop phase does not use `-strip`, so ICC profiles are preserved intact during cropping regardless of colorspace.
+
+Most slide content (screen captures, web-downloaded photos) is already sRGB, so this change has no visible effect on those images.
 
 ### Shared Images
 
