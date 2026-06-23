@@ -365,6 +365,8 @@ When you crop in PowerPoint's UI:
 
 With `-CropSlides`, this script physically removes the cropped portions.
 
+When the same source image is cropped with identical geometry on multiple shapes, the crop is materialized once and the resulting file is shared across all those shapes. Duplicated crops no longer inflate the output file.
+
 ### Format Conversion
 
 The script intelligently converts formats when beneficial:
