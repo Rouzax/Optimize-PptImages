@@ -50,6 +50,7 @@
         [string]$OptimizedFile
         [System.Xml.XmlDocument]$SlideDocument  # Reference to parent document for saving
         [int]$SourceJpegQuality  # For JPEG quality assessment
+        [bool]$NeedsSrgbConversion
     }
 
     class ImageGroup {

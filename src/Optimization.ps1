@@ -316,11 +316,11 @@
         return $null
     }
 
-    # Probe each unique media file's transparency percent (for .png and convertible formats)
-    # or JPEG quality (for .jpg/.jpeg) in parallel, then apply cached values to all usages
-    # of that file. Runspaces invoke only magick and return raw strings; parsing is sequential
-    # in the parent. Uses $script:MagickExe. Tolerates an empty usage list (parallel block is
-    # skipped). Progress bar uses Id 5 ("Analyzing images").
+    # Probe each unique media file's transparency percent (for .png and convertible formats),
+    # JPEG quality (for .jpg/.jpeg), and color profile (for all formats) in parallel, then
+    # apply cached values to all usages of that file. Runspaces invoke only magick and return
+    # raw strings; parsing is sequential in the parent. Uses $script:MagickExe. Tolerates an
+    # empty usage list (parallel block is skipped). Progress bar uses Id 5 ("Analyzing images").
     function Update-OptimizeProbesParallel {
         param(
             [System.Collections.Generic.List[ImageUsage]]$usages
@@ -379,6 +379,22 @@
             Write-Progress -Activity "Analyzing images" -Completed -Id 5
         }
 
+        # Color probe: run for every unique image regardless of format. The identify call reads
+        # only the image header and embedded ICC profile, so it is cheap. Runspaces call no
+        # module function; Test-NeedsSrgbConversion is called sequentially in the parent parse.
+        $allUniquePaths = @($usages | Group-Object -Property ImagePhysicalPath | Where-Object {
+            Test-Path -LiteralPath $_.Name
+        } | ForEach-Object { $_.Name })
+
+        $colorResults = @()
+        if ($allUniquePaths.Count -gt 0) {
+            $colorResults = @($allUniquePaths) | ForEach-Object -Parallel {
+                $path = $_
+                $out = & $using:magickExe identify -format "%[colorspace]`n%[profile:icc]" $path 2>&1
+                [PSCustomObject]@{ Path = $path; Kind = 'color'; Raw = $out }
+            } -ThrottleLimit ([Environment]::ProcessorCount)
+        }
+
         # Parse results sequentially and apply to all usages sharing each path.
         $probeMap = @{}
         foreach ($r in $rawResults) {
@@ -399,14 +415,29 @@
             }
         }
 
+        # Parse color probe results: first line is colorspace, remaining lines joined are the
+        # ICC description (empty when the image is untagged). Test-NeedsSrgbConversion is a
+        # pure helper called here in the parent, never inside a runspace.
+        $colorMap = @{}
+        foreach ($r in $colorResults) {
+            $lines = @($r.Raw)
+            $colorspace = if ($lines.Count -gt 0) { "$($lines[0])".Trim() } else { '' }
+            $iccDescription = if ($lines.Count -gt 1) { ($lines[1..($lines.Count - 1)] -join ' ').Trim() } else { '' }
+            $colorMap[$r.Path] = Test-NeedsSrgbConversion -Colorspace $colorspace -IccDescription $iccDescription
+        }
+
         foreach ($usage in $usages) {
             $p = $usage.ImagePhysicalPath
-            if (-not $probeMap.ContainsKey($p)) { continue }
-            $probe = $probeMap[$p]
-            if ($probe.Kind -eq 'transparency') {
-                $usage.EffectiveTransparencyPercent = $probe.Value
-            } elseif ($probe.Kind -eq 'quality') {
-                $usage.SourceJpegQuality = $probe.Value
+            if ($probeMap.ContainsKey($p)) {
+                $probe = $probeMap[$p]
+                if ($probe.Kind -eq 'transparency') {
+                    $usage.EffectiveTransparencyPercent = $probe.Value
+                } elseif ($probe.Kind -eq 'quality') {
+                    $usage.SourceJpegQuality = $probe.Value
+                }
+            }
+            if ($colorMap.ContainsKey($p)) {
+                $usage.NeedsSrgbConversion = $colorMap[$p]
             }
         }
     }
