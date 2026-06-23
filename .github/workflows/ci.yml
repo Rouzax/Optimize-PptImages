@@ -28,6 +28,39 @@ jobs:
           Install-Module Pester -MinimumVersion 5.3.0 -Force -SkipPublisherCheck -Scope CurrentUser
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
 
+      # ImageMagick 7 ('magick') is required by the image tests. apt ships ImageMagick 6
+      # (no 'magick' command), so install the official IM7 portable binary via AppImage
+      # extraction (no FUSE needed on the runner).
+      - name: Install ImageMagick (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd /tmp
+          wget -q https://imagemagick.org/archive/binaries/magick -O magick
+          chmod +x magick
+          ./magick --appimage-extract > /dev/null
+          sudo mv squashfs-root /opt/imagemagick
+          sudo ln -s /opt/imagemagick/AppRun /usr/local/bin/magick
+          magick --version
+
+      - name: Install ImageMagick (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install imagemagick.app --no-progress -y
+          Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+          refreshenv
+          magick --version
+
+      # The fixture generator and validity tests use the DocumentFormat.OpenXml SDK via
+      # PackageManagement (Get-Package + Add-Type). Pin the exact version (supply-chain).
+      - name: Install Open XML SDK
+        shell: pwsh
+        run: |
+          Install-PackageProvider -Name NuGet -Force -Scope CurrentUser | Out-Null
+          Register-PackageSource -Name nuget.org -Location https://www.nuget.org/api/v2 -ProviderName NuGet -Trusted -Force -ErrorAction SilentlyContinue
+          Install-Package -Name DocumentFormat.OpenXml -RequiredVersion 3.5.1 -Source nuget.org -Scope CurrentUser -Force | Out-Null
+          Get-Package -Name DocumentFormat.OpenXml.Framework
+
       - name: Import module
         shell: pwsh
         run: Import-Module ./Optimize-PptImages.psd1 -Force; Write-Host 'Module import OK'
